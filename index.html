@@ -265,7 +265,7 @@
     appId: "1:33381407955:web:f17c861698735bc1914826"
   };
   const SYNC_PATH = 'projecthub';
-  const OWNER_EMAIL = 'chrispolicky@gmail.com';
+  const OWNER_LOGIN_EMAIL = 'owner@project-hub.app';
   let fbDb = null;
 
   let state = {
@@ -274,6 +274,7 @@
     projects: [],
     loaded: false,
     user: null,
+    passcodeError: '',
     sync: { status: 'connecting', lastSynced: null }
   };
 
@@ -285,9 +286,8 @@
     try{
       firebase.initializeApp(FIREBASE_CONFIG);
       fbDb = firebase.database();
-      firebase.auth().getRedirectResult().catch(() => {});
       firebase.auth().onAuthStateChanged(user => {
-        if(user && user.email === OWNER_EMAIL){
+        if(user && user.email === OWNER_LOGIN_EMAIL){
           state.user = user;
           attachSyncListener();
         } else if(user){
@@ -306,11 +306,13 @@
     }
   }
 
-  function signInWithGoogle(){
+  function signInWithPasscode(passcode){
     if(typeof firebase === 'undefined') return;
-    const provider = new firebase.auth.GoogleAuthProvider();
-    provider.setCustomParameters({ login_hint: OWNER_EMAIL });
-    firebase.auth().signInWithRedirect(provider);
+    state.passcodeError = '';
+    firebase.auth().signInWithEmailAndPassword(OWNER_LOGIN_EMAIL, passcode).catch(err => {
+      state.passcodeError = (err && err.code === 'auth/invalid-credential') ? 'Incorrect passcode.' : 'Sign-in failed. Try again.';
+      render();
+    });
   }
 
   function signOutOfSync(){
@@ -446,15 +448,18 @@
         </div>
         <div class="sync-sub">Last synced: ${relTime(state.sync.lastSynced)}.</div>
         ${state.user ? `
-        <div class="sync-sub">Signed in as <strong>${escapeHtml(state.user.email)}</strong>.</div>
+        <div class="sync-sub">Unlocked on this device.</div>
         <div class="sync-btn-row">
           <button class="sync-btn" id="sync-now-btn">Sync now</button>
-          <button class="sync-btn secondary" id="sign-out-btn">Sign out</button>
+          <button class="sync-btn secondary" id="sign-out-btn">Lock</button>
         </div>` : `
-        <div class="sync-sub">Sign in with Google to sync across your devices. Only ${OWNER_EMAIL} can access this data.</div>
-        <div class="sync-btn-row">
-          <button class="sync-btn" id="sign-in-btn">Sign in with Google</button>
-        </div>`}
+        <div class="sync-sub">Enter your passcode to sync across devices. This unlocks sync on this device until you tap "Lock."</div>
+        <div class="add-row">
+          <input type="password" id="passcode-input" placeholder="Passcode" inputmode="numeric" autocomplete="off" />
+          <button id="passcode-btn" style="--cat-color:#3EBBA9">Unlock</button>
+        </div>
+        ${state.passcodeError ? `<div class="sync-sub" style="color:var(--pink); margin-top:6px;">${escapeHtml(state.passcodeError)}</div>` : ''}
+        `}
       </div>
 
       <div class="sync-page-card">
@@ -588,10 +593,15 @@
     if(state.view === 'sync'){
       const syncNowBtn = root.querySelector('#sync-now-btn');
       if(syncNowBtn) syncNowBtn.addEventListener('click', () => { pushToCloud(); render(); });
-      const signInBtn = root.querySelector('#sign-in-btn');
-      if(signInBtn) signInBtn.addEventListener('click', signInWithGoogle);
       const signOutBtn = root.querySelector('#sign-out-btn');
       if(signOutBtn) signOutBtn.addEventListener('click', signOutOfSync);
+      const passcodeBtn = root.querySelector('#passcode-btn');
+      const passcodeInput = root.querySelector('#passcode-input');
+      if(passcodeBtn && passcodeInput){
+        const doUnlock = () => { if(passcodeInput.value) signInWithPasscode(passcodeInput.value); };
+        passcodeBtn.addEventListener('click', doUnlock);
+        passcodeInput.addEventListener('keydown', e => { if(e.key === 'Enter') doUnlock(); });
+      }
       root.querySelector('#export-btn').addEventListener('click', exportData);
       const importBtn = root.querySelector('#import-btn');
       const importFile = root.querySelector('#import-file');
