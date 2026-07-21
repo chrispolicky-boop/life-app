@@ -1,0 +1,687 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Project Hub</title>
+
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#191D1A">
+
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Project Hub">
+<meta name="mobile-web-app-capable" content="yes">
+
+<style>
+  html, body { margin:0; padding:0; background:#191D1A; }
+</style>
+
+</head>
+<body>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap');
+
+  :root{
+    --bg:#191D1A;
+    --card:#232821;
+    --ink:#ECEFE9;
+    --ink-soft:#8B968D;
+    --line:#2E342B;
+    --teal:#3EBBA9;
+    --indigo:#7C81F5;
+    --gold:#E8B23D;
+    --pink:#EA7EB0;
+    --coral:#F2836E;
+    --forest:#57B978;
+    --font-display:'Poppins', sans-serif;
+    --font-body:'Inter', sans-serif;
+    --font-mono:'IBM Plex Mono', monospace;
+  }
+  *{ box-sizing:border-box; }
+  #hub-b{
+    font-family: var(--font-body);
+    color: var(--ink);
+    background: var(--bg);
+    min-height: 100vh;
+    padding: 22px 16px 40px;
+    line-height: 1.5;
+    position: relative;
+  }
+  #hub-b button, #hub-b input, #hub-b textarea{ font-family: var(--font-body); }
+  .wrap{ max-width: 560px; margin: 0 auto; }
+
+  .header{ margin-bottom: 20px; display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+  .greet{ font-family: var(--font-display); font-weight: 700; font-size: 24px; letter-spacing: -0.01em; }
+  .date{ font-family: var(--font-mono); font-size: 12px; color: var(--ink-soft); margin-top: 4px; }
+  .sync-icon-btn{
+    flex-shrink:0; width:38px; height:38px; border-radius:50%;
+    background: var(--card); border:1px solid var(--line); color: var(--ink-soft);
+    display:flex; align-items:center; justify-content:center; position:relative;
+  }
+  .sync-icon-btn svg{ width:18px; height:18px; }
+  .sync-icon-btn:hover{ color: var(--ink); border-color: var(--teal); }
+  .sync-dot{ position:absolute; top:-1px; right:-1px; width:9px; height:9px; border-radius:50%; border:2px solid var(--bg); background: var(--ink-soft); }
+  .sync-dot.ok{ background: var(--forest); }
+  .sync-dot.err{ background: var(--pink); }
+  .sync-dot.pending{ background: var(--gold); }
+
+  .ghost-btn{ font-family: var(--font-body); font-size: 11px; font-weight:600; color: var(--ink-soft); background: var(--card); border:1px solid var(--line); border-radius:10px; padding:7px 12px; white-space:nowrap; }
+  .ghost-btn:hover{ color: var(--ink); border-color: var(--teal); }
+
+  .sync-page-card{ background: var(--card); border:1px solid var(--line); border-radius:16px; padding:18px 18px 20px; margin-bottom:16px; }
+  .sync-status-row{ display:flex; align-items:center; gap:9px; margin-bottom:4px; }
+  .sync-status-dot{ width:9px; height:9px; border-radius:50%; background: var(--ink-soft); flex-shrink:0; }
+  .sync-status-dot.ok{ background: var(--forest); }
+  .sync-status-dot.err{ background: var(--pink); }
+  .sync-status-dot.pending{ background: var(--gold); }
+  .sync-status-text{ font-family: var(--font-display); font-weight:600; font-size:15px; }
+  .sync-sub{ font-size:12.5px; color: var(--ink-soft); margin-top:2px; margin-bottom:14px; }
+  .sync-btn-row{ display:flex; gap:8px; flex-wrap:wrap; }
+  .sync-btn{ border:none; background: var(--teal); color:#fff; border-radius:12px; padding:9px 16px; font-family: var(--font-display); font-weight:600; font-size:12.5px; }
+  .sync-btn:hover{ filter: brightness(0.92); }
+  .sync-btn.secondary{ background: var(--card); border:1px solid var(--line); color: var(--ink); }
+  .sync-btn.danger{ background: var(--pink); }
+  .back-link{ background:none; border:none; color: var(--ink-soft); font-size:12px; font-weight:600; margin-bottom:16px; padding:0; }
+  .back-link:hover{ color: var(--ink); }
+
+  .hero-card{
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    padding: 18px 20px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 22px;
+  }
+  .ring-wrap{ flex-shrink: 0; }
+  .hero-text .hlabel{ font-family: var(--font-display); font-weight: 600; font-size: 16px; }
+  .hero-text .hsub{ font-size: 12.5px; color: var(--ink-soft); margin-top: 2px; }
+
+  .section-title{ font-family: var(--font-display); font-weight: 600; font-size: 19px; margin-bottom: 4px; display:flex; align-items:center; gap:8px; }
+  .section-sub{ font-size: 12.5px; color: var(--ink-soft); margin-bottom: 16px; }
+
+  /* Home grid */
+  .proj-grid{ display:grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 8px; }
+  .proj-card{
+    background: var(--card); border:1px solid var(--line); border-radius:18px;
+    padding: 16px 14px; display:flex; flex-direction:column; align-items:center; text-align:center; gap:10px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.25);
+  }
+  .proj-card:hover{ border-color: var(--cat-color, var(--teal)); }
+  .proj-name{ font-family: var(--font-display); font-weight:600; font-size: 13.5px; }
+  .proj-sub{ font-size: 11px; color: var(--ink-soft); }
+  .proj-card.add-card{ justify-content:center; color: var(--ink-soft); border-style:dashed; min-height: 128px; }
+  .proj-card.add-card:hover{ color: var(--ink); border-color: var(--teal); }
+  .proj-card.add-card .plus{ font-size: 28px; font-family: var(--font-display); line-height:1; }
+
+  .card{ background: var(--card); border:1px solid var(--line); border-radius:16px; padding:16px 16px 18px; margin-bottom: 16px; }
+  .card .k{ font-family: var(--font-mono); font-size: 10.5px; letter-spacing:.06em; text-transform: uppercase; color: var(--ink-soft); margin-bottom: 8px; display:flex; align-items:center; justify-content:space-between; }
+  .card textarea{ width:100%; border:1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--ink); padding: 11px 13px; font-size: 13.5px; line-height: 1.55; resize: vertical; min-height: 74px; font-family: var(--font-body); }
+  .card textarea::placeholder{ color: var(--ink-soft); }
+  .card textarea:focus{ outline: 2px solid var(--cat-color, var(--teal)); outline-offset: -1px; background: var(--card); }
+  .ai-btn{ display:flex; align-items:center; justify-content:center; gap:8px; width:100%; border:none; background: var(--cat-color, var(--teal)); color:#fff; border-radius:12px; padding: 12px 16px; font-family: var(--font-display); font-weight:600; font-size:14px; }
+  .ai-btn:hover{ filter:brightness(0.92); }
+  .ai-btn svg{ width:16px; height:16px; }
+  .ai-hint{ font-size:11.5px; color: var(--ink-soft); margin-top:8px; text-align:center; }
+
+  .item-card{
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 13px 14px;
+    margin-bottom: 10px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.25);
+    border-left: 4px solid var(--cat-color, var(--teal));
+  }
+  .row{ display:flex; align-items:flex-start; gap: 11px; }
+  .check{ width:22px; height:22px; border-radius:7px; border:2px solid var(--line); background:var(--bg); flex-shrink:0; margin-top:1px; display:flex; align-items:center; justify-content:center; padding:0; }
+  .check.done{ background: var(--cat-color, var(--teal)); border-color: var(--cat-color, var(--teal)); }
+  .check.done::after{ content:'\2713'; color:#fff; font-size:13px; line-height:1; font-weight:700; }
+  .txt{ flex:1; font-size: 14.5px; font-weight: 500; padding-top: 2px; }
+  .txt.done{ text-decoration: line-through; color: var(--ink-soft); }
+  .icon-btn{ background:none; border:none; color: var(--ink-soft); font-size:12px; padding: 3px 5px; font-family: var(--font-body); }
+  .icon-btn:hover{ color: var(--ink); }
+  .btn-row{ display:flex; gap: 2px; }
+  .empty{ color: var(--ink-soft); font-size: 13.5px; font-style: italic; padding: 6px 2px 14px; }
+
+  .add-row{ display:flex; gap: 8px; margin-top: 4px; }
+  .add-row input{ flex:1; border: 1.5px solid var(--line); border-radius: 12px; padding: 11px 14px; font-size: 14px; background: var(--card); color: var(--ink); }
+  .add-row input::placeholder{ color: var(--ink-soft); }
+  .add-row input:focus{ outline:none; border-color: var(--cat-color, var(--teal)); }
+  .add-row button{ border: none; background: var(--cat-color, var(--teal)); color: #fff; border-radius: 12px; padding: 0 20px; font-family: var(--font-display); font-weight: 600; font-size: 13px; }
+  .add-row button:hover{ filter: brightness(0.92); }
+
+  .danger-zone{ margin-top: 28px; padding-top: 16px; border-top: 1px dashed var(--line); }
+
+  .bottom-nav{
+    position: fixed; bottom: 0; left: 0; right: 0;
+    background: rgba(25,29,26,0.92);
+    backdrop-filter: blur(10px);
+    border-top: 1px solid var(--line);
+    display: flex;
+    padding: 8px 4px calc(8px + env(safe-area-inset-bottom, 0px));
+    z-index: 10;
+  }
+  .nav-btn{
+    flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px;
+    background: none; border: none; padding: 6px 2px; color: var(--ink-soft);
+    font-family: var(--font-body); font-size: 9.5px; font-weight: 500;
+  }
+  .nav-btn svg{ width: 20px; height: 20px; }
+  .nav-btn.active{ color: var(--teal); }
+
+  #hub-b{ padding-bottom: 90px; }
+</style>
+
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-database-compat.js"></script>
+
+<div id="hub-b"></div>
+
+<script>
+(function(){
+  const root = document.getElementById('hub-b');
+  const STORAGE_KEY = 'project-hub-v1';
+  const COLORS = ['#3EBBA9','#7C81F5','#E8B23D','#EA7EB0','#F2836E','#57B978'];
+
+  const SEED_PROJECTS = [
+    {
+      id: 'fe-exam',
+      name: 'FE Exam Prep',
+      color: '#3EBBA9',
+      scope: 'Pass the FE (Mechanical) exam in fall 2027. Build the habit early by solving one practice problem a day, work through the NCEES FE Mechanical reference handbook section by section, and take full-length practice exams starting summer 2027.',
+      notes: '',
+      tasks: [
+        { text: "Solve today's FE practice problem" },
+        { text: 'Get the NCEES FE Mechanical reference handbook (it’s free as a PDF)' },
+        { text: 'Set up a spreadsheet or app to track daily problems by topic' },
+        { text: 'Pick an FE prep course or question bank' }
+      ]
+    },
+    {
+      id: 'rc-sailboat',
+      name: 'RC Sailboat',
+      color: '#7C81F5',
+      scope: 'Design and build a radio-controlled sailboat that I can pilot from my phone, and that automatically trims the sails and rudder angle based on live wind speed and direction from an onboard sensor.',
+      notes: '',
+      tasks: [
+        { text: 'Research wind vane + anemometer sensor options' },
+        { text: 'Pick a microcontroller (ESP32 for phone Bluetooth/WiFi control)' },
+        { text: 'Sketch the hull and rig in CAD' },
+        { text: 'Prototype the sail winch / trim mechanism' },
+        { text: 'Design the phone control app or interface' }
+      ]
+    },
+    {
+      id: 'showcase-site',
+      name: 'Showcase Website',
+      color: '#E8B23D',
+      scope: 'Build a personal portfolio site documenting every engineering project I finish (RC sailboat, drone, CAD work, research) so future employers can see real hands-on design experience, not just a resume line.',
+      notes: '',
+      tasks: [
+        { text: 'Decide on a simple stack (static site is fine to start)' },
+        { text: 'Write a case study for one finished project' },
+        { text: 'Add resume, contact info, and links (LinkedIn, GitHub)' },
+        { text: 'Deploy it live with a real URL' }
+      ]
+    }
+  ];
+
+  function icon(name){
+    const paths = {
+      sync: '<path d="M3 12a9 9 0 0115.3-6.4L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 01-15.3 6.4L3 16"/><path d="M3 21v-5h5"/>',
+      home: '<path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/>',
+      ai: '<path d="M12 3l1.9 4.9L19 9.8l-4.9 1.9L12 16.6l-1.9-4.9L5 9.8l4.9-1.9L12 3z"/><path d="M19 15l.9 2.3L22.2 18l-2.3.9L19 21.2l-.9-2.3L15.8 18l2.3-.9L19 15z"/>'
+    };
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' + paths[name] + '</svg>';
+  }
+
+  function makeId(){ return 'i' + Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
+
+  function defaultData(){
+    return SEED_PROJECTS.map(p => ({
+      id: p.id,
+      name: p.name,
+      color: p.color,
+      scope: p.scope,
+      notes: p.notes,
+      tasks: p.tasks.map(t => ({ id: makeId(), text: t.text, done: false }))
+    }));
+  }
+
+  const FIREBASE_CONFIG = {
+    apiKey: "AIzaSyCNVjKV-vf1bdAbEQwqXZufktjqvF9kxRc",
+    authDomain: "personal-goals-app-32e5b.firebaseapp.com",
+    databaseURL: "https://personal-goals-app-32e5b-default-rtdb.firebaseio.com",
+    projectId: "personal-goals-app-32e5b",
+    storageBucket: "personal-goals-app-32e5b.firebasestorage.app",
+    messagingSenderId: "33381407955",
+    appId: "1:33381407955:web:f17c861698735bc1914826"
+  };
+  const SYNC_PATH = 'projecthub';
+  let fbDb = null;
+
+  let state = {
+    view: 'home',
+    activeProject: null,
+    projects: [],
+    loaded: false,
+    sync: { status: 'connecting', lastSynced: null }
+  };
+
+  function initFirebase(){
+    if(typeof firebase === 'undefined'){
+      state.sync.status = 'unavailable';
+      return;
+    }
+    try{
+      firebase.initializeApp(FIREBASE_CONFIG);
+      fbDb = firebase.database();
+      firebase.auth().onAuthStateChanged(user => {
+        if(user) attachSyncListener();
+      });
+      firebase.auth().signInAnonymously().catch(() => {
+        state.sync.status = 'error';
+        render();
+      });
+    }catch(e){
+      state.sync.status = 'error';
+    }
+  }
+
+  function attachSyncListener(){
+    state.sync.status = 'connected';
+    fbDb.ref(SYNC_PATH).on('value', snap => {
+      const val = snap.val();
+      if(!val || !val.projects){ render(); return; }
+      const incomingStr = JSON.stringify(val.projects);
+      if(incomingStr === JSON.stringify(state.projects)){
+        state.sync.lastSynced = val.updatedAt || new Date().toISOString();
+        render();
+        return;
+      }
+      const activeTag = document.activeElement && document.activeElement.tagName;
+      if(activeTag === 'INPUT' || activeTag === 'TEXTAREA'){
+        return;
+      }
+      state.projects = val.projects;
+      state.sync.lastSynced = val.updatedAt || new Date().toISOString();
+      try{ localStorage.setItem(STORAGE_KEY, incomingStr); }catch(e){}
+      render();
+    }, () => {
+      state.sync.status = 'error';
+      render();
+    });
+  }
+
+  function pushToCloud(){
+    if(!fbDb) return;
+    const payload = { projects: state.projects, updatedAt: new Date().toISOString() };
+    fbDb.ref(SYNC_PATH).set(payload).then(() => {
+      state.sync.lastSynced = payload.updatedAt;
+    }).catch(() => {
+      state.sync.status = 'error';
+      render();
+    });
+  }
+
+  async function loadState(){
+    try{
+      const raw = localStorage.getItem(STORAGE_KEY);
+      state.projects = raw ? JSON.parse(raw) : defaultData();
+    }catch(e){ state.projects = defaultData(); }
+    state.loaded = true;
+    render();
+    initFirebase();
+  }
+  function save(rerender){
+    try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state.projects)); }catch(e){}
+    pushToCloud();
+    if(rerender !== false) render();
+  }
+  function pct(tasks){
+    if(!tasks || !tasks.length) return 0;
+    const done = tasks.filter(t => t.done).length;
+    return Math.round((done/tasks.length)*100);
+  }
+  function escapeHtml(str){ const d = document.createElement('div'); d.textContent = str || ''; return d.innerHTML; }
+  function fmtDate(){ return new Date().toLocaleDateString('en-US',{weekday:'long', month:'long', day:'numeric'}); }
+  function greeting(){
+    const h = new Date().getHours();
+    if(h < 12) return 'Good morning';
+    if(h < 18) return 'Good afternoon';
+    return 'Good evening';
+  }
+
+  function ringSVG(percent, color, size){
+    size = size || 64;
+    const r = size === 64 ? 26 : 22, c = 2*Math.PI*r;
+    const off = c - (c*percent/100);
+    const fontSize = size === 64 ? 14 : 12;
+    return `<svg width="${size}" height="${size}" viewBox="0 0 64 64">
+      <circle cx="32" cy="32" r="${r}" fill="none" stroke="#2E342B" stroke-width="7"/>
+      <circle cx="32" cy="32" r="${r}" fill="none" stroke="${color}" stroke-width="7" stroke-linecap="round"
+        stroke-dasharray="${c}" stroke-dashoffset="${off}" transform="rotate(-90 32 32)"/>
+      <text x="32" y="37" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-weight="600" font-size="${fontSize}" fill="#ECEFE9">${percent}%</text>
+    </svg>`;
+  }
+
+  function syncDotClass(){
+    if(state.sync.status === 'connected') return 'ok';
+    if(state.sync.status === 'error' || state.sync.status === 'unavailable') return 'err';
+    return 'pending';
+  }
+  function syncStatusLabel(){
+    if(state.sync.status === 'connected') return 'Synced';
+    if(state.sync.status === 'error') return 'Sync error';
+    if(state.sync.status === 'unavailable') return 'Sync unavailable';
+    return 'Connecting…';
+  }
+  function relTime(iso){
+    if(!iso) return 'never';
+    const diff = Math.max(0, Date.now() - new Date(iso).getTime());
+    const s = Math.round(diff/1000);
+    if(s < 10) return 'just now';
+    if(s < 60) return s + 's ago';
+    const m = Math.round(s/60);
+    if(m < 60) return m + 'm ago';
+    const h = Math.round(m/60);
+    if(h < 24) return h + 'h ago';
+    return new Date(iso).toLocaleString('en-US', { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' });
+  }
+
+  function buildAiPrompt(p){
+    const doneTasks = p.tasks.filter(t=>t.done).map(t=>t.text);
+    const openTasks = p.tasks.filter(t=>!t.done).map(t=>t.text);
+    let msg = `I'm a mechanical engineering student working on a project called "${p.name}."\n\n`;
+    msg += `Defined scope: ${p.scope || '(not written yet)'}\n\n`;
+    if(openTasks.length) msg += `Open tasks: ${openTasks.join('; ')}\n`;
+    if(doneTasks.length) msg += `Already done: ${doneTasks.join('; ')}\n`;
+    if(p.notes && p.notes.trim()) msg += `\nNotes so far: ${p.notes.trim()}\n`;
+    msg += `\nHelp me make progress on this — suggest concrete next steps, flag anything I'm missing, and answer any engineering questions I have.`;
+    return msg;
+  }
+
+  function renderSyncPage(){
+    return `
+      <button class="back-link" id="back-btn">← Back</button>
+      <div class="section-title">Sync</div>
+      <div class="section-sub">One place for cross-device sync and backups. This is what keeps your laptop and phone showing the same data.</div>
+
+      <div class="sync-page-card">
+        <div class="sync-status-row">
+          <div class="sync-status-dot ${syncDotClass()}"></div>
+          <div class="sync-status-text">${syncStatusLabel()}</div>
+        </div>
+        <div class="sync-sub">Last synced: ${relTime(state.sync.lastSynced)}. Changes on this device sync automatically to your other devices when both are online — no downloading or copying files.</div>
+        <div class="sync-btn-row">
+          <button class="sync-btn" id="sync-now-btn">Sync now</button>
+        </div>
+      </div>
+
+      <div class="sync-page-card">
+        <div class="sync-status-text" style="margin-bottom:4px;">Backup</div>
+        <div class="sync-sub">Save a copy of everything to a file, or load one back in.</div>
+        <div class="sync-btn-row">
+          <button class="sync-btn secondary" id="export-btn">Export to file</button>
+          <button class="sync-btn secondary" id="import-btn">Import from file</button>
+          <input type="file" id="import-file" accept="application/json" style="display:none" />
+        </div>
+      </div>`;
+  }
+
+  function renderHome(){
+    const cards = state.projects.map(p => {
+      const p2 = pct(p.tasks);
+      const doneCt = p.tasks.filter(t=>t.done).length;
+      return `
+        <button class="proj-card" style="--cat-color:${p.color}" data-open="${p.id}">
+          ${ringSVG(p2, p.color, 56)}
+          <div class="proj-name">${escapeHtml(p.name)}</div>
+          <div class="proj-sub">${doneCt} of ${p.tasks.length} tasks</div>
+        </button>`;
+    }).join('');
+    return `
+      <div class="section-title">Your Projects</div>
+      <div class="section-sub">Tap a project to see its scope, tasks, and notes.</div>
+      <div class="proj-grid">
+        ${cards}
+        <button class="proj-card add-card" id="add-project-btn">
+          <div class="plus">+</div>
+          <div class="proj-name">New project</div>
+        </button>
+      </div>`;
+  }
+
+  function renderProject(p){
+    const p2 = pct(p.tasks);
+    const doneCt = p.tasks.filter(t=>t.done).length;
+    const taskRows = p.tasks.map(t => `
+      <div class="item-card" style="--cat-color:${p.color}">
+        <div class="row">
+          <button class="check ${t.done?'done':''}" style="--cat-color:${p.color}" data-toggle="${t.id}"></button>
+          <div class="txt ${t.done?'done':''}">${escapeHtml(t.text)}</div>
+          <div class="btn-row">
+            <button class="icon-btn" data-del-task="${t.id}">✕</button>
+          </div>
+        </div>
+      </div>`).join('');
+
+    return `
+      <button class="back-link" id="back-btn">← All projects</button>
+
+      <div class="hero-card">
+        <div class="ring-wrap">${ringSVG(p2, p.color)}</div>
+        <div class="hero-text">
+          <div class="hlabel">${escapeHtml(p.name)}</div>
+          <div class="hsub">${doneCt} of ${p.tasks.length} tasks done</div>
+        </div>
+      </div>
+
+      <div class="card" style="--cat-color:${p.color}">
+        <div class="k">Defined Scope</div>
+        <textarea data-scope placeholder="What exactly are you trying to accomplish with this project?">${escapeHtml(p.scope)}</textarea>
+      </div>
+
+      <div class="card" style="--cat-color:${p.color}">
+        <div class="k">Ask AI about this project</div>
+        <button class="ai-btn" style="--cat-color:${p.color}" id="ask-ai-btn">${icon('ai')} Open in Claude</button>
+        <div class="ai-hint">Opens a new Claude chat pre-filled with this project's scope, tasks, and notes.</div>
+      </div>
+
+      <div class="section-title" style="font-size:16px;">Tasks</div>
+      <div class="section-sub">Checking these off moves the ring above.</div>
+      ${p.tasks.length ? taskRows : '<div class="empty">No tasks yet — add your first one below.</div>'}
+      <div class="add-row">
+        <input type="text" id="task-input" placeholder="Add a task…" />
+        <button style="--cat-color:${p.color}" id="add-task-btn">Add</button>
+      </div>
+
+      <div class="card" style="--cat-color:${p.color}; margin-top:20px;">
+        <div class="k">Notes — things I've learned</div>
+        <textarea data-notes placeholder="Jot down anything worth remembering as you work on this…">${escapeHtml(p.notes)}</textarea>
+      </div>
+
+      <div class="danger-zone">
+        <button class="sync-btn danger" id="delete-project-btn">Delete project</button>
+      </div>`;
+  }
+
+  function render(){
+    if(!state.loaded){ root.innerHTML = '<div style="padding:40px;color:#8B968D;">Loading…</div>'; return; }
+
+    let bodyHtml;
+    if(state.view === 'sync'){
+      bodyHtml = renderSyncPage();
+    } else if(state.view === 'project'){
+      const p = state.projects.find(x => x.id === state.activeProject);
+      if(!p){ state.view = 'home'; bodyHtml = renderHome(); }
+      else bodyHtml = renderProject(p);
+    } else {
+      bodyHtml = renderHome();
+    }
+
+    root.innerHTML = `
+      <div class="wrap">
+        <div class="header">
+          <div>
+            <div class="greet">${greeting()}, Chris</div>
+            <div class="date">${fmtDate()}</div>
+          </div>
+          <button class="sync-icon-btn" id="sync-icon-btn" title="Sync settings">
+            ${icon('sync')}
+            <span class="sync-dot ${syncDotClass()}"></span>
+          </button>
+        </div>
+        ${bodyHtml}
+      </div>
+      <div class="bottom-nav">
+        <button class="nav-btn ${state.view==='home'?'active':''}" id="nav-home">${icon('home')}<span>Home</span></button>
+        <button class="nav-btn ${state.view==='sync'?'active':''}" id="nav-sync">${icon('sync')}<span>Sync</span></button>
+      </div>`;
+
+    root.querySelector('#sync-icon-btn').addEventListener('click', () => { state.view='sync'; render(); window.scrollTo(0,0); });
+    root.querySelector('#nav-home').addEventListener('click', () => { state.view='home'; state.activeProject=null; render(); window.scrollTo(0,0); });
+    root.querySelector('#nav-sync').addEventListener('click', () => { state.view='sync'; render(); window.scrollTo(0,0); });
+
+    const backBtn = root.querySelector('#back-btn');
+    if(backBtn) backBtn.addEventListener('click', () => { state.view='home'; state.activeProject=null; render(); window.scrollTo(0,0); });
+
+    if(state.view === 'sync'){
+      root.querySelector('#sync-now-btn').addEventListener('click', () => { pushToCloud(); render(); });
+      root.querySelector('#export-btn').addEventListener('click', exportData);
+      const importBtn = root.querySelector('#import-btn');
+      const importFile = root.querySelector('#import-file');
+      importBtn.addEventListener('click', () => importFile.click());
+      importFile.addEventListener('change', e => {
+        const file = e.target.files[0];
+        if(file) importDataFromFile(file);
+        e.target.value = '';
+      });
+      return;
+    }
+
+    if(state.view === 'home'){
+      root.querySelectorAll('[data-open]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          state.activeProject = btn.getAttribute('data-open');
+          state.view = 'project';
+          render(); window.scrollTo(0,0);
+        });
+      });
+      root.querySelector('#add-project-btn').addEventListener('click', addProject);
+      return;
+    }
+
+    if(state.view === 'project'){
+      const p = state.projects.find(x => x.id === state.activeProject);
+      if(!p) return;
+
+      root.querySelector('[data-scope]').addEventListener('blur', e => { p.scope = e.target.value; save(); });
+      root.querySelector('[data-notes]').addEventListener('blur', e => { p.notes = e.target.value; save(); });
+
+      root.querySelector('#ask-ai-btn').addEventListener('click', () => {
+        const url = 'https://claude.ai/new?q=' + encodeURIComponent(buildAiPrompt(p));
+        window.open(url, '_blank', 'noopener');
+      });
+
+      root.querySelectorAll('[data-toggle]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const id = btn.getAttribute('data-toggle');
+          const t = p.tasks.find(x => x.id === id);
+          if(t){ t.done = !t.done; save(); }
+        });
+      });
+      root.querySelectorAll('[data-del-task]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const id = btn.getAttribute('data-del-task');
+          p.tasks = p.tasks.filter(x => x.id !== id);
+          save();
+        });
+      });
+
+      const taskInput = root.querySelector('#task-input');
+      const addTaskBtn = root.querySelector('#add-task-btn');
+      const doAddTask = () => {
+        const v = taskInput.value.trim();
+        if(!v) return;
+        p.tasks.push({ id: makeId(), text: v, done: false });
+        save();
+      };
+      addTaskBtn.addEventListener('click', doAddTask);
+      taskInput.addEventListener('keydown', e => { if(e.key==='Enter') doAddTask(); });
+
+      root.querySelector('#delete-project-btn').addEventListener('click', () => {
+        const ok = confirm(`Delete "${p.name}" and all its tasks/notes? This can't be undone.`);
+        if(!ok) return;
+        state.projects = state.projects.filter(x => x.id !== p.id);
+        state.view = 'home';
+        state.activeProject = null;
+        save();
+      });
+    }
+  }
+
+  function addProject(){
+    const name = prompt('Project name:');
+    if(!name || !name.trim()) return;
+    const color = COLORS[state.projects.length % COLORS.length];
+    const newP = { id: makeId(), name: name.trim(), color, scope: '', notes: '', tasks: [] };
+    state.projects.push(newP);
+    state.activeProject = newP.id;
+    state.view = 'project';
+    save();
+  }
+
+  function exportData(){
+    const payload = { app: 'project-hub', version: 1, exportedAt: new Date().toISOString(), projects: state.projects };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'project-hub-export-' + new Date().toISOString().slice(0,10) + '.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  function importDataFromFile(file){
+    const reader = new FileReader();
+    reader.onload = () => {
+      try{
+        const parsed = JSON.parse(reader.result);
+        const incoming = (parsed && parsed.projects) ? parsed.projects : parsed;
+        const looksValid = Array.isArray(incoming);
+        if(!looksValid) throw new Error('unrecognized format');
+        const ok = confirm('Import will replace the data currently on this device with the file you selected. Continue?');
+        if(!ok) return;
+        state.projects = incoming;
+        save();
+        alert('Import complete.');
+      }catch(e){
+        alert('Could not read that file — make sure it is a Project Hub export.');
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  loadState();
+})();
+</script>
+
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('sw.js').catch(() => {});
+    });
+  }
+</script>
+</body>
+</html>
