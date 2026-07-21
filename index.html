@@ -298,13 +298,20 @@
   }
   function normalizeProjects(list){ return asArray(list).map(normalizeProject); }
 
+  const BUDGET_PERIODS = [
+    { key: 'weekly', label: 'Weekly' },
+    { key: 'monthly', label: 'Monthly' },
+    { key: 'yearly', label: 'Yearly' }
+  ];
   function toMoney(x){ const n = typeof x === 'number' ? x : parseFloat(x); return isFinite(n) ? n : 0; }
   function normalizeBudget(b){
     b = b || {};
+    const validPeriods = BUDGET_PERIODS.map(p => p.key);
     return {
       id: b.id || makeId(),
       name: b.name || 'Untitled budget',
       limit: toMoney(b.limit),
+      period: validPeriods.includes(b.period) ? b.period : 'monthly',
       expenses: asArray(b.expenses).map(e => ({ id: (e && e.id) || makeId(), amount: toMoney(e && e.amount), note: (e && e.note) || '' }))
     };
   }
@@ -344,6 +351,7 @@
     addingProject: false,
     deleteArmed: false,
     addingBudget: false,
+    addingBudgetPeriod: null,
     budgetDeleteArmed: false,
     importPending: null,
     importStatus: '',
@@ -588,8 +596,9 @@
       </div>`;
   }
 
-  function renderFinanceTab(){
-    const rows = state.budgets.map(b => {
+  function renderBudgetSection(periodKey, label){
+    const items = state.budgets.filter(b => b.period === periodKey);
+    const rows = items.map(b => {
       const spent = spentOf(b);
       const p = budgetPct(b);
       return `
@@ -602,9 +611,10 @@
         </button>`;
     }).join('');
 
-    const addForm = state.addingBudget ? `
+    const isAdding = state.addingBudget && state.addingBudgetPeriod === periodKey;
+    const addForm = isAdding ? `
       <div class="card">
-        <div class="k">New Budget</div>
+        <div class="k">New ${label} Budget</div>
         <input type="text" id="new-budget-name" placeholder="Category name (e.g. Groceries)" class="money-input" style="margin-bottom:8px;" />
         <input type="number" id="new-budget-limit" placeholder="Budget amount ($)" inputmode="decimal" class="money-input" style="margin-bottom:12px;" />
         <div class="sync-btn-row">
@@ -612,16 +622,24 @@
           <button class="sync-btn secondary" id="new-budget-cancel">Cancel</button>
         </div>
       </div>` : `
-      <button class="card" id="add-budget-btn" style="width:100%; text-align:center; color:var(--ink-soft); cursor:pointer;">
-        <div style="font-size:22px; font-family:var(--font-display); line-height:1;">+</div>
-        <div style="font-family:var(--font-display); font-weight:600; font-size:13px; margin-top:4px;">New budget</div>
+      <button class="card" data-add-budget="${periodKey}" style="width:100%; text-align:center; color:var(--ink-soft); cursor:pointer;">
+        <div style="font-size:20px; font-family:var(--font-display); line-height:1;">+</div>
+        <div style="font-family:var(--font-display); font-weight:600; font-size:12.5px; margin-top:4px;">New ${label.toLowerCase()} budget</div>
       </button>`;
 
     return `
-      <div class="section-title">Finance</div>
-      <div class="section-sub">Track spending against what you've budgeted for each category.</div>
-      ${rows || '<div class="empty">No budgets yet — add your first one below.</div>'}
+      <div class="section-title" style="font-size:16px; margin-top:22px;">${label}</div>
+      ${rows || `<div class="empty">No ${label.toLowerCase()} budgets yet.</div>`}
       ${addForm}`;
+  }
+
+  function renderFinanceTab(){
+    return `
+      <div class="section-title">Finance</div>
+      <div class="section-sub">Track spending against what you've budgeted, split by how often it resets.</div>
+      ${renderBudgetSection('weekly', 'Weekly')}
+      ${renderBudgetSection('monthly', 'Monthly')}
+      ${renderBudgetSection('yearly', 'Yearly')}`;
   }
 
   function renderBudgetDetail(b){
@@ -827,6 +845,7 @@
         state.activeBudget = null;
         state.budgetDeleteArmed = false;
         state.addingBudget = false;
+        state.addingBudgetPeriod = null;
         render(); window.scrollTo(0,0);
       });
     });
@@ -925,14 +944,19 @@
           const name = nameInput.value.trim();
           const limit = toMoney(limitInput.value);
           if(!name || limit <= 0) return;
-          addBudget(name, limit);
+          addBudget(name, limit, state.addingBudgetPeriod);
         };
         saveBtn.addEventListener('click', doSave);
-        cancelBtn.addEventListener('click', () => { state.addingBudget = false; render(); });
+        cancelBtn.addEventListener('click', () => { state.addingBudget = false; state.addingBudgetPeriod = null; render(); });
         limitInput.addEventListener('keydown', e => { if(e.key === 'Enter') doSave(); });
-      } else {
-        root.querySelector('#add-budget-btn').addEventListener('click', () => { state.addingBudget = true; render(); });
       }
+      root.querySelectorAll('[data-add-budget]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          state.addingBudget = true;
+          state.addingBudgetPeriod = btn.getAttribute('data-add-budget');
+          render();
+        });
+      });
       return;
     }
 
@@ -1046,12 +1070,13 @@
     save();
   }
 
-  function addBudget(name, limit){
-    const newB = { id: makeId(), name: name.trim(), limit, expenses: [] };
+  function addBudget(name, limit, period){
+    const newB = { id: makeId(), name: name.trim(), limit, period: period || 'monthly', expenses: [] };
     state.budgets.push(newB);
     state.activeBudget = newB.id;
     state.view = 'budget';
     state.addingBudget = false;
+    state.addingBudgetPeriod = null;
     save();
   }
 
