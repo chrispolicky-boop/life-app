@@ -455,7 +455,7 @@
         </div>` : `
         <div class="sync-sub">Enter your passcode to sync across devices. This unlocks sync on this device until you tap "Lock."</div>
         <div class="add-row">
-          <input type="password" id="passcode-input" placeholder="Passcode" inputmode="numeric" autocomplete="off" />
+          <input type="password" id="passcode-input" placeholder="Passcode" autocomplete="off" />
           <button id="passcode-btn" style="--cat-color:#3EBBA9">Unlock</button>
         </div>
         ${state.passcodeError ? `<div class="sync-sub" style="color:var(--pink); margin-top:6px;">${escapeHtml(state.passcodeError)}</div>` : ''}
