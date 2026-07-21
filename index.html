@@ -158,6 +158,12 @@
 
   .danger-zone{ margin-top: 28px; padding-top: 16px; border-top: 1px dashed var(--line); }
 
+  .bar-track{ width:100%; background: var(--bg); border:1px solid var(--line); border-radius:6px; overflow:hidden; }
+  .bar-fill{ height:100%; border-radius:6px; transition: width .2s ease; }
+  .money-input{ border: 1.5px solid var(--line); border-radius: 12px; padding: 11px 14px; font-size: 14px; background: var(--card); color: var(--ink); width:100%; }
+  .money-input::placeholder{ color: var(--ink-soft); }
+  .money-input:focus{ outline:none; border-color: var(--teal); }
+
   .bottom-nav{
     position: fixed; bottom: 0; left: 0; right: 0;
     background: rgba(25,29,26,0.92);
@@ -292,6 +298,26 @@
   }
   function normalizeProjects(list){ return asArray(list).map(normalizeProject); }
 
+  function toMoney(x){ const n = typeof x === 'number' ? x : parseFloat(x); return isFinite(n) ? n : 0; }
+  function normalizeBudget(b){
+    b = b || {};
+    return {
+      id: b.id || makeId(),
+      name: b.name || 'Untitled budget',
+      limit: toMoney(b.limit),
+      expenses: asArray(b.expenses).map(e => ({ id: (e && e.id) || makeId(), amount: toMoney(e && e.amount), note: (e && e.note) || '' }))
+    };
+  }
+  function normalizeBudgets(list){ return asArray(list).map(normalizeBudget); }
+  function spentOf(b){ return b.expenses.reduce((sum, e) => sum + e.amount, 0); }
+  function budgetPct(b){ return b.limit ? Math.round((spentOf(b) / b.limit) * 100) : 0; }
+  function budgetBarColor(p){ if(p >= 100) return 'var(--pink)'; if(p >= 80) return 'var(--gold)'; return 'var(--teal)'; }
+  function fmtMoney(n){ return '$' + toMoney(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  function barHTML(p, big){
+    const clamped = Math.min(100, Math.max(0, p));
+    return `<div class="bar-track" style="height:${big ? '12px' : '8px'}"><div class="bar-fill" style="width:${clamped}%; background:${budgetBarColor(p)};"></div></div>`;
+  }
+
   const FIREBASE_CONFIG = {
     apiKey: "AIzaSyCNVjKV-vf1bdAbEQwqXZufktjqvF9kxRc",
     authDomain: "personal-goals-app-32e5b.firebaseapp.com",
@@ -310,11 +336,15 @@
     view: 'tab',
     activeProject: null,
     projects: [],
+    activeBudget: null,
+    budgets: [],
     loaded: false,
     user: null,
     passcodeError: '',
     addingProject: false,
     deleteArmed: false,
+    addingBudget: false,
+    budgetDeleteArmed: false,
     importPending: null,
     importStatus: '',
     sync: { status: 'connecting', lastSynced: null }
@@ -367,8 +397,8 @@
     fbDb.ref(SYNC_PATH).on('value', snap => {
       const val = snap.val();
       if(!val || !val.projects){ render(); return; }
-      const incomingStr = JSON.stringify(val.projects);
-      if(incomingStr === JSON.stringify(state.projects)){
+      const incomingStr = JSON.stringify({ projects: val.projects, budgets: val.budgets });
+      if(incomingStr === JSON.stringify({ projects: state.projects, budgets: state.budgets })){
         state.sync.lastSynced = val.updatedAt || new Date().toISOString();
         render();
         return;
@@ -378,8 +408,9 @@
         return;
       }
       state.projects = normalizeProjects(val.projects);
+      state.budgets = normalizeBudgets(val.budgets);
       state.sync.lastSynced = val.updatedAt || new Date().toISOString();
-      try{ localStorage.setItem(STORAGE_KEY, incomingStr); }catch(e){}
+      try{ localStorage.setItem(STORAGE_KEY, JSON.stringify({ projects: state.projects, budgets: state.budgets })); }catch(e){}
       render();
     }, () => {
       state.sync.status = 'error';
@@ -389,7 +420,7 @@
 
   function pushToCloud(){
     if(!fbDb || !state.user) return;
-    const payload = { projects: state.projects, updatedAt: new Date().toISOString() };
+    const payload = { projects: state.projects, budgets: state.budgets, updatedAt: new Date().toISOString() };
     fbDb.ref(SYNC_PATH).set(payload).then(() => {
       state.sync.lastSynced = payload.updatedAt;
     }).catch(() => {
@@ -401,14 +432,25 @@
   async function loadState(){
     try{
       const raw = localStorage.getItem(STORAGE_KEY);
-      state.projects = normalizeProjects(raw ? JSON.parse(raw) : defaultData());
-    }catch(e){ state.projects = defaultData(); }
+      const parsed = raw ? JSON.parse(raw) : null;
+      if(Array.isArray(parsed)){
+        // old storage shape: a bare projects array, from before budgets existed
+        state.projects = normalizeProjects(parsed);
+        state.budgets = [];
+      } else if(parsed){
+        state.projects = normalizeProjects(parsed.projects);
+        state.budgets = normalizeBudgets(parsed.budgets);
+      } else {
+        state.projects = defaultData();
+        state.budgets = [];
+      }
+    }catch(e){ state.projects = defaultData(); state.budgets = []; }
     state.loaded = true;
     render();
     initFirebase();
   }
   function save(rerender){
-    try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state.projects)); }catch(e){}
+    try{ localStorage.setItem(STORAGE_KEY, JSON.stringify({ projects: state.projects, budgets: state.budgets })); }catch(e){}
     pushToCloud();
     if(rerender !== false) render();
   }
@@ -513,7 +555,7 @@
           <input type="file" id="import-file" accept="application/json" style="display:none" />
         </div>
         ${state.importPending ? `
-        <div class="sync-sub" style="color:var(--gold); margin-top:10px;">This will replace the data on this device with the imported file (${state.importPending.length} project${state.importPending.length===1?'':'s'}).</div>
+        <div class="sync-sub" style="color:var(--gold); margin-top:10px;">This will replace the data on this device with the imported file (${state.importPending.projects.length} project${state.importPending.projects.length===1?'':'s'}, ${state.importPending.budgets.length} budget${state.importPending.budgets.length===1?'':'s'}).</div>
         <div class="sync-btn-row">
           <button class="sync-btn" id="import-confirm-btn">Replace with imported data</button>
           <button class="sync-btn secondary" id="import-cancel-btn">Cancel</button>
@@ -543,6 +585,85 @@
       <div class="section-sub">${escapeHtml(subtitle)}</div>
       <div class="card">
         <div class="empty" style="padding:10px 2px;">This section is coming soon — tell me what you want to track here and we'll build it out.</div>
+      </div>`;
+  }
+
+  function renderFinanceTab(){
+    const rows = state.budgets.map(b => {
+      const spent = spentOf(b);
+      const p = budgetPct(b);
+      return `
+        <button class="item-card" style="display:block; width:100%; text-align:left; border-left-color:${budgetBarColor(p)};" data-open-budget="${b.id}">
+          <div style="display:flex; justify-content:space-between; align-items:baseline; gap:8px; margin-bottom:10px;">
+            <div style="font-weight:600; font-size:14.5px;">${escapeHtml(b.name)}</div>
+            <div style="font-family:var(--font-mono); font-size:12px; color:var(--ink-soft); white-space:nowrap;">${fmtMoney(spent)} / ${fmtMoney(b.limit)}</div>
+          </div>
+          ${barHTML(p)}
+        </button>`;
+    }).join('');
+
+    const addForm = state.addingBudget ? `
+      <div class="card">
+        <div class="k">New Budget</div>
+        <input type="text" id="new-budget-name" placeholder="Category name (e.g. Groceries)" class="money-input" style="margin-bottom:8px;" />
+        <input type="number" id="new-budget-limit" placeholder="Budget amount ($)" inputmode="decimal" class="money-input" style="margin-bottom:12px;" />
+        <div class="sync-btn-row">
+          <button class="sync-btn" id="new-budget-save">Add budget</button>
+          <button class="sync-btn secondary" id="new-budget-cancel">Cancel</button>
+        </div>
+      </div>` : `
+      <button class="card" id="add-budget-btn" style="width:100%; text-align:center; color:var(--ink-soft); cursor:pointer;">
+        <div style="font-size:22px; font-family:var(--font-display); line-height:1;">+</div>
+        <div style="font-family:var(--font-display); font-weight:600; font-size:13px; margin-top:4px;">New budget</div>
+      </button>`;
+
+    return `
+      <div class="section-title">Finance</div>
+      <div class="section-sub">Track spending against what you've budgeted for each category.</div>
+      ${rows || '<div class="empty">No budgets yet — add your first one below.</div>'}
+      ${addForm}`;
+  }
+
+  function renderBudgetDetail(b){
+    const spent = spentOf(b);
+    const p = budgetPct(b);
+    const remaining = b.limit - spent;
+    const expenseRows = b.expenses.slice().reverse().map(e => `
+      <div class="item-card" style="border-left-color:${budgetBarColor(p)};">
+        <div class="row">
+          <div class="txt">${escapeHtml(e.note || 'Expense')}</div>
+          <div style="font-family:var(--font-mono); font-size:13px; padding-top:2px;">${fmtMoney(e.amount)}</div>
+          <div class="btn-row">
+            <button class="icon-btn" data-del-expense="${e.id}">✕</button>
+          </div>
+        </div>
+      </div>`).join('');
+
+    return `
+      <button class="back-link" id="back-btn">← Finance</button>
+
+      <div class="hero-card" style="display:block;">
+        <div class="hlabel">${escapeHtml(b.name)}</div>
+        <div class="hsub" style="margin-bottom:12px;">${fmtMoney(spent)} of ${fmtMoney(b.limit)} spent — ${remaining >= 0 ? fmtMoney(remaining) + ' left' : fmtMoney(-remaining) + ' over budget'}</div>
+        ${barHTML(p, true)}
+      </div>
+
+      <div class="section-title" style="font-size:16px;">Expenses</div>
+      <div class="section-sub">Add what you spend and watch the bar move.</div>
+      ${b.expenses.length ? expenseRows : '<div class="empty">No expenses logged yet.</div>'}
+      <div class="add-row">
+        <input type="number" id="expense-amount" placeholder="Amount" inputmode="decimal" style="max-width:100px;" />
+        <input type="text" id="expense-note" placeholder="What was it for? (optional)" />
+        <button id="add-expense-btn">Add</button>
+      </div>
+
+      <div class="card" style="margin-top:20px;">
+        <div class="k">Budget amount</div>
+        <input type="number" id="edit-budget-limit" value="${b.limit}" inputmode="decimal" class="money-input" />
+      </div>
+
+      <div class="danger-zone">
+        <button class="sync-btn danger" id="delete-budget-btn">${state.budgetDeleteArmed ? 'Tap again to permanently delete' : 'Delete budget'}</button>
       </div>`;
   }
 
@@ -663,9 +784,13 @@
       const p = state.projects.find(x => x.id === state.activeProject);
       if(!p){ state.view = 'tab'; state.tab = 'projects'; bodyHtml = renderProjectsTab(); }
       else bodyHtml = renderProject(p);
+    } else if(state.view === 'budget'){
+      const b = state.budgets.find(x => x.id === state.activeBudget);
+      if(!b){ state.view = 'tab'; state.tab = 'finance'; bodyHtml = renderFinanceTab(); }
+      else bodyHtml = renderBudgetDetail(b);
     } else {
       if(state.tab === 'projects') bodyHtml = renderProjectsTab();
-      else if(state.tab === 'finance') bodyHtml = renderPlaceholderTab('Finance', 'Budgets, savings goals, and spending.');
+      else if(state.tab === 'finance') bodyHtml = renderFinanceTab();
       else if(state.tab === 'school') bodyHtml = renderPlaceholderTab('School', 'Classes, assignments, and deadlines.');
       else if(state.tab === 'todo') bodyHtml = renderPlaceholderTab('To-Do List', 'Daily tasks and reminders.');
       else if(state.tab === 'goals') bodyHtml = renderPlaceholderTab('Goals', 'Personal goals and habits you want to build.');
@@ -699,12 +824,22 @@
         state.activeProject = null;
         state.deleteArmed = false;
         state.addingProject = false;
+        state.activeBudget = null;
+        state.budgetDeleteArmed = false;
+        state.addingBudget = false;
         render(); window.scrollTo(0,0);
       });
     });
 
     const backBtn = root.querySelector('#back-btn');
-    if(backBtn) backBtn.addEventListener('click', () => { state.view='tab'; state.activeProject=null; state.deleteArmed=false; render(); window.scrollTo(0,0); });
+    if(backBtn) backBtn.addEventListener('click', () => {
+      state.view='tab';
+      state.activeProject=null;
+      state.deleteArmed=false;
+      state.activeBudget=null;
+      state.budgetDeleteArmed=false;
+      render(); window.scrollTo(0,0);
+    });
 
     if(state.view === 'sync'){
       const syncNowBtn = root.querySelector('#sync-now-btn');
@@ -730,7 +865,8 @@
       const importConfirmBtn = root.querySelector('#import-confirm-btn');
       const importCancelBtn = root.querySelector('#import-cancel-btn');
       if(importConfirmBtn) importConfirmBtn.addEventListener('click', () => {
-        state.projects = normalizeProjects(state.importPending);
+        state.projects = state.importPending.projects;
+        state.budgets = state.importPending.budgets;
         state.importPending = null;
         state.importStatus = 'ok:Import complete.';
         save();
@@ -767,6 +903,82 @@
       } else {
         root.querySelector('#add-project-btn').addEventListener('click', () => { state.addingProject = true; render(); });
       }
+      return;
+    }
+
+    if(state.view === 'tab' && state.tab === 'finance'){
+      root.querySelectorAll('[data-open-budget]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          state.activeBudget = btn.getAttribute('data-open-budget');
+          state.view = 'budget';
+          state.budgetDeleteArmed = false;
+          render(); window.scrollTo(0,0);
+        });
+      });
+      if(state.addingBudget){
+        const nameInput = root.querySelector('#new-budget-name');
+        const limitInput = root.querySelector('#new-budget-limit');
+        const saveBtn = root.querySelector('#new-budget-save');
+        const cancelBtn = root.querySelector('#new-budget-cancel');
+        if(nameInput) nameInput.focus();
+        const doSave = () => {
+          const name = nameInput.value.trim();
+          const limit = toMoney(limitInput.value);
+          if(!name || limit <= 0) return;
+          addBudget(name, limit);
+        };
+        saveBtn.addEventListener('click', doSave);
+        cancelBtn.addEventListener('click', () => { state.addingBudget = false; render(); });
+        limitInput.addEventListener('keydown', e => { if(e.key === 'Enter') doSave(); });
+      } else {
+        root.querySelector('#add-budget-btn').addEventListener('click', () => { state.addingBudget = true; render(); });
+      }
+      return;
+    }
+
+    if(state.view === 'budget'){
+      const b = state.budgets.find(x => x.id === state.activeBudget);
+      if(!b) return;
+
+      root.querySelector('#edit-budget-limit').addEventListener('blur', e => {
+        b.limit = toMoney(e.target.value);
+        save();
+      });
+
+      root.querySelectorAll('[data-del-expense]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const id = btn.getAttribute('data-del-expense');
+          b.expenses = b.expenses.filter(x => x.id !== id);
+          save();
+        });
+      });
+
+      const amountInput = root.querySelector('#expense-amount');
+      const noteInput = root.querySelector('#expense-note');
+      const addExpenseBtn = root.querySelector('#add-expense-btn');
+      const doAddExpense = () => {
+        const amount = toMoney(amountInput.value);
+        if(amount <= 0) return;
+        b.expenses.push({ id: makeId(), amount, note: noteInput.value.trim() });
+        save();
+      };
+      addExpenseBtn.addEventListener('click', doAddExpense);
+      noteInput.addEventListener('keydown', e => { if(e.key === 'Enter') doAddExpense(); });
+      amountInput.addEventListener('keydown', e => { if(e.key === 'Enter') doAddExpense(); });
+
+      root.querySelector('#delete-budget-btn').addEventListener('click', () => {
+        if(!state.budgetDeleteArmed){
+          state.budgetDeleteArmed = true;
+          render();
+          return;
+        }
+        state.budgets = state.budgets.filter(x => x.id !== b.id);
+        state.view = 'tab';
+        state.tab = 'finance';
+        state.activeBudget = null;
+        state.budgetDeleteArmed = false;
+        save();
+      });
       return;
     }
 
@@ -834,8 +1046,17 @@
     save();
   }
 
+  function addBudget(name, limit){
+    const newB = { id: makeId(), name: name.trim(), limit, expenses: [] };
+    state.budgets.push(newB);
+    state.activeBudget = newB.id;
+    state.view = 'budget';
+    state.addingBudget = false;
+    save();
+  }
+
   function exportData(){
-    const payload = { app: 'project-hub', version: 1, exportedAt: new Date().toISOString(), projects: state.projects };
+    const payload = { app: 'project-hub', version: 1, exportedAt: new Date().toISOString(), projects: state.projects, budgets: state.budgets };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -852,9 +1073,12 @@
     reader.onload = () => {
       try{
         const parsed = JSON.parse(reader.result);
-        const incoming = (parsed && parsed.projects) ? parsed.projects : parsed;
-        if(!Array.isArray(incoming)) throw new Error('unrecognized format');
-        state.importPending = normalizeProjects(incoming);
+        const incomingProjects = (parsed && parsed.projects) ? parsed.projects : (Array.isArray(parsed) ? parsed : null);
+        if(!Array.isArray(incomingProjects)) throw new Error('unrecognized format');
+        state.importPending = {
+          projects: normalizeProjects(incomingProjects),
+          budgets: normalizeBudgets(parsed && parsed.budgets)
+        };
         state.importStatus = '';
         render();
       }catch(e){
