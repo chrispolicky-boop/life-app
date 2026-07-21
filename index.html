@@ -367,10 +367,10 @@
     addingProject: false,
     deleteArmed: false,
     addingBudget: false,
-    addingBudgetPeriod: null,
     budgetDeleteArmed: false,
     addingSavingsGoal: false,
     savingsDeleteArmed: false,
+    financeCategory: null,
     importPending: null,
     importStatus: '',
     sync: { status: 'connecting', lastSynced: null }
@@ -618,7 +618,7 @@
       </div>`;
   }
 
-  function renderBudgetSection(periodKey, label){
+  function renderBudgetListBody(periodKey, label){
     const items = state.budgets.filter(b => b.period === periodKey);
     const rows = items.map(b => {
       const spent = spentOf(b);
@@ -633,8 +633,7 @@
         </button>`;
     }).join('');
 
-    const isAdding = state.addingBudget && state.addingBudgetPeriod === periodKey;
-    const addForm = isAdding ? `
+    const addForm = state.addingBudget ? `
       <div class="card">
         <div class="k">New ${label} Budget</div>
         <input type="text" id="new-budget-name" placeholder="Category name (e.g. Groceries)" class="money-input" style="margin-bottom:8px;" />
@@ -644,18 +643,17 @@
           <button class="sync-btn secondary" id="new-budget-cancel">Cancel</button>
         </div>
       </div>` : `
-      <button class="card" data-add-budget="${periodKey}" style="width:100%; text-align:center; color:var(--ink-soft); cursor:pointer;">
+      <button class="card" id="add-budget-btn" style="width:100%; text-align:center; color:var(--ink-soft); cursor:pointer;">
         <div style="font-size:20px; font-family:var(--font-display); line-height:1;">+</div>
         <div style="font-family:var(--font-display); font-weight:600; font-size:12.5px; margin-top:4px;">New ${label.toLowerCase()} budget</div>
       </button>`;
 
     return `
-      <div class="section-title" style="font-size:16px; margin-top:22px;">${label}</div>
       ${rows || `<div class="empty">No ${label.toLowerCase()} budgets yet.</div>`}
       ${addForm}`;
   }
 
-  function renderSavingsSection(){
+  function renderSavingsListBody(){
     const rows = state.savingsGoals.map(g => {
       const saved = savedOf(g);
       const p = savingsPct(g);
@@ -685,19 +683,66 @@
       </button>`;
 
     return `
-      <div class="section-title" style="font-size:16px; margin-top:22px;">Savings Goals</div>
       ${rows || '<div class="empty">No savings goals yet.</div>'}
       ${addForm}`;
   }
 
+  const FINANCE_CATEGORIES = [
+    { key: 'weekly', label: 'Weekly' },
+    { key: 'monthly', label: 'Monthly' },
+    { key: 'yearly', label: 'Yearly' },
+    { key: 'savings', label: 'Savings' }
+  ];
+
+  function renderFinanceCategoryCard(key, label){
+    let current, max, color, count, unit;
+    if(key === 'savings'){
+      max = state.savingsGoals.reduce((s, g) => s + g.target, 0);
+      current = state.savingsGoals.reduce((s, g) => s + savedOf(g), 0);
+      count = state.savingsGoals.length;
+      unit = 'goal';
+    } else {
+      const items = state.budgets.filter(b => b.period === key);
+      max = items.reduce((s, b) => s + b.limit, 0);
+      current = items.reduce((s, b) => s + spentOf(b), 0);
+      count = items.length;
+      unit = 'budget';
+    }
+    const p = max ? Math.round((current / max) * 100) : 0;
+    color = key === 'savings' ? savingsBarColor(p) : budgetBarColor(p);
+    return `
+      <button class="item-card" style="display:block; width:100%; text-align:left; border-left-color:${color};" data-open-category="${key}">
+        <div style="display:flex; justify-content:space-between; align-items:baseline; gap:8px; margin-bottom:10px;">
+          <div style="font-weight:600; font-size:15px;">${label}</div>
+          <div style="font-family:var(--font-mono); font-size:12px; color:var(--ink-soft); white-space:nowrap;">${fmtMoney(current)} / ${fmtMoney(max)}</div>
+        </div>
+        ${barHTML(p, false, color)}
+        <div class="proj-sub" style="margin-top:8px;">${count} ${unit}${count===1?'':'s'}</div>
+      </button>`;
+  }
+
   function renderFinanceTab(){
+    const cards = FINANCE_CATEGORIES.map(c => renderFinanceCategoryCard(c.key, c.label)).join('');
     return `
       <div class="section-title">Finance</div>
-      <div class="section-sub">Track spending against what you've budgeted, split by how often it resets.</div>
-      ${renderBudgetSection('weekly', 'Weekly')}
-      ${renderBudgetSection('monthly', 'Monthly')}
-      ${renderBudgetSection('yearly', 'Yearly')}
-      ${renderSavingsSection()}`;
+      <div class="section-sub">Tap a category to see the budgets or goals inside it.</div>
+      ${cards}`;
+  }
+
+  function renderFinanceCategoryDetail(categoryKey){
+    const cat = FINANCE_CATEGORIES.find(c => c.key === categoryKey);
+    const label = cat ? cat.label : '';
+    const body = categoryKey === 'savings'
+      ? renderSavingsListBody()
+      : renderBudgetListBody(categoryKey, label);
+    const subtitle = categoryKey === 'savings'
+      ? "Add what you put toward each goal and watch its bar move."
+      : `Track spending against what you've budgeted for each ${label.toLowerCase()} category.`;
+    return `
+      <button class="back-link" id="back-btn">← Finance</button>
+      <div class="section-title">${label}</div>
+      <div class="section-sub">${subtitle}</div>
+      ${body}`;
   }
 
   function renderSavingsGoalDetail(g){
@@ -716,7 +761,7 @@
       </div>`).join('');
 
     return `
-      <button class="back-link" id="back-btn">← Finance</button>
+      <button class="back-link" id="back-btn">← Savings</button>
 
       <div class="hero-card" style="display:block;">
         <div class="hlabel">${escapeHtml(g.name)}</div>
@@ -758,8 +803,9 @@
         </div>
       </div>`).join('');
 
+    const periodLabel = (BUDGET_PERIODS.find(x => x.key === b.period) || {}).label || 'Finance';
     return `
-      <button class="back-link" id="back-btn">← Finance</button>
+      <button class="back-link" id="back-btn">← ${periodLabel}</button>
 
       <div class="hero-card" style="display:block;">
         <div class="hlabel">${escapeHtml(b.name)}</div>
@@ -911,6 +957,8 @@
       const g = state.savingsGoals.find(x => x.id === state.activeSavingsGoal);
       if(!g){ state.view = 'tab'; state.tab = 'finance'; bodyHtml = renderFinanceTab(); }
       else bodyHtml = renderSavingsGoalDetail(g);
+    } else if(state.view === 'financeCategory'){
+      bodyHtml = renderFinanceCategoryDetail(state.financeCategory);
     } else {
       if(state.tab === 'projects') bodyHtml = renderProjectsTab();
       else if(state.tab === 'finance') bodyHtml = renderFinanceTab();
@@ -950,23 +998,37 @@
         state.activeBudget = null;
         state.budgetDeleteArmed = false;
         state.addingBudget = false;
-        state.addingBudgetPeriod = null;
         state.activeSavingsGoal = null;
         state.savingsDeleteArmed = false;
         state.addingSavingsGoal = false;
+        state.financeCategory = null;
         render(); window.scrollTo(0,0);
       });
     });
 
     const backBtn = root.querySelector('#back-btn');
     if(backBtn) backBtn.addEventListener('click', () => {
-      state.view='tab';
-      state.activeProject=null;
-      state.deleteArmed=false;
-      state.activeBudget=null;
-      state.budgetDeleteArmed=false;
-      state.activeSavingsGoal=null;
-      state.savingsDeleteArmed=false;
+      if(state.view === 'budget' || state.view === 'savings'){
+        // step back to the finance category page these were opened from
+        state.view = 'financeCategory';
+        state.activeBudget = null;
+        state.budgetDeleteArmed = false;
+        state.activeSavingsGoal = null;
+        state.savingsDeleteArmed = false;
+      } else if(state.view === 'financeCategory'){
+        state.view = 'tab';
+        state.financeCategory = null;
+        state.addingBudget = false;
+        state.addingSavingsGoal = false;
+      } else {
+        state.view = 'tab';
+        state.activeProject = null;
+        state.deleteArmed = false;
+        state.activeBudget = null;
+        state.budgetDeleteArmed = false;
+        state.activeSavingsGoal = null;
+        state.savingsDeleteArmed = false;
+      }
       render(); window.scrollTo(0,0);
     });
 
@@ -1037,38 +1099,17 @@
     }
 
     if(state.view === 'tab' && state.tab === 'finance'){
-      root.querySelectorAll('[data-open-budget]').forEach(btn => {
+      root.querySelectorAll('[data-open-category]').forEach(btn => {
         btn.addEventListener('click', () => {
-          state.activeBudget = btn.getAttribute('data-open-budget');
-          state.view = 'budget';
-          state.budgetDeleteArmed = false;
+          state.financeCategory = btn.getAttribute('data-open-category');
+          state.view = 'financeCategory';
           render(); window.scrollTo(0,0);
         });
       });
-      if(state.addingBudget){
-        const nameInput = root.querySelector('#new-budget-name');
-        const limitInput = root.querySelector('#new-budget-limit');
-        const saveBtn = root.querySelector('#new-budget-save');
-        const cancelBtn = root.querySelector('#new-budget-cancel');
-        if(nameInput) nameInput.focus();
-        const doSave = () => {
-          const name = nameInput.value.trim();
-          const limit = toMoney(limitInput.value);
-          if(!name || limit <= 0) return;
-          addBudget(name, limit, state.addingBudgetPeriod);
-        };
-        saveBtn.addEventListener('click', doSave);
-        cancelBtn.addEventListener('click', () => { state.addingBudget = false; state.addingBudgetPeriod = null; render(); });
-        limitInput.addEventListener('keydown', e => { if(e.key === 'Enter') doSave(); });
-      }
-      root.querySelectorAll('[data-add-budget]').forEach(btn => {
-        btn.addEventListener('click', () => {
-          state.addingBudget = true;
-          state.addingBudgetPeriod = btn.getAttribute('data-add-budget');
-          render();
-        });
-      });
+      return;
+    }
 
+    if(state.view === 'financeCategory' && state.financeCategory === 'savings'){
       root.querySelectorAll('[data-open-savings]').forEach(btn => {
         btn.addEventListener('click', () => {
           state.activeSavingsGoal = btn.getAttribute('data-open-savings');
@@ -1095,6 +1136,38 @@
       } else {
         const addSavingsBtn = root.querySelector('#add-savings-btn');
         if(addSavingsBtn) addSavingsBtn.addEventListener('click', () => { state.addingSavingsGoal = true; render(); });
+      }
+      return;
+    }
+
+    if(state.view === 'financeCategory'){
+      const periodKey = state.financeCategory;
+      root.querySelectorAll('[data-open-budget]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          state.activeBudget = btn.getAttribute('data-open-budget');
+          state.view = 'budget';
+          state.budgetDeleteArmed = false;
+          render(); window.scrollTo(0,0);
+        });
+      });
+      if(state.addingBudget){
+        const nameInput = root.querySelector('#new-budget-name');
+        const limitInput = root.querySelector('#new-budget-limit');
+        const saveBtn = root.querySelector('#new-budget-save');
+        const cancelBtn = root.querySelector('#new-budget-cancel');
+        if(nameInput) nameInput.focus();
+        const doSave = () => {
+          const name = nameInput.value.trim();
+          const limit = toMoney(limitInput.value);
+          if(!name || limit <= 0) return;
+          addBudget(name, limit, periodKey);
+        };
+        saveBtn.addEventListener('click', doSave);
+        cancelBtn.addEventListener('click', () => { state.addingBudget = false; render(); });
+        limitInput.addEventListener('keydown', e => { if(e.key === 'Enter') doSave(); });
+      } else {
+        const addBudgetBtn = root.querySelector('#add-budget-btn');
+        if(addBudgetBtn) addBudgetBtn.addEventListener('click', () => { state.addingBudget = true; render(); });
       }
       return;
     }
@@ -1261,7 +1334,6 @@
     state.activeBudget = newB.id;
     state.view = 'budget';
     state.addingBudget = false;
-    state.addingBudgetPeriod = null;
     save();
   }
 
