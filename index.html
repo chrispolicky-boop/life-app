@@ -255,6 +255,27 @@
     }));
   }
 
+  // Firebase's Realtime Database can hand back array-like data as a
+  // keyed object (e.g. after certain edits), so normalize defensively
+  // rather than assuming .map/.filter/.push are always available.
+  function asArray(x){
+    if(Array.isArray(x)) return x;
+    if(x && typeof x === 'object') return Object.values(x);
+    return [];
+  }
+  function normalizeProject(p){
+    p = p || {};
+    return {
+      id: p.id || makeId(),
+      name: p.name || 'Untitled project',
+      color: p.color || COLORS[0],
+      scope: p.scope || '',
+      notes: p.notes || '',
+      tasks: asArray(p.tasks).map(t => ({ id: (t && t.id) || makeId(), text: (t && t.text) || '', done: !!(t && t.done) }))
+    };
+  }
+  function normalizeProjects(list){ return asArray(list).map(normalizeProject); }
+
   const FIREBASE_CONFIG = {
     apiKey: "AIzaSyCNVjKV-vf1bdAbEQwqXZufktjqvF9kxRc",
     authDomain: "personal-goals-app-32e5b.firebaseapp.com",
@@ -275,6 +296,10 @@
     loaded: false,
     user: null,
     passcodeError: '',
+    addingProject: false,
+    deleteArmed: false,
+    importPending: null,
+    importStatus: '',
     sync: { status: 'connecting', lastSynced: null }
   };
 
@@ -335,7 +360,7 @@
       if(activeTag === 'INPUT' || activeTag === 'TEXTAREA'){
         return;
       }
-      state.projects = val.projects;
+      state.projects = normalizeProjects(val.projects);
       state.sync.lastSynced = val.updatedAt || new Date().toISOString();
       try{ localStorage.setItem(STORAGE_KEY, incomingStr); }catch(e){}
       render();
@@ -359,7 +384,7 @@
   async function loadState(){
     try{
       const raw = localStorage.getItem(STORAGE_KEY);
-      state.projects = raw ? JSON.parse(raw) : defaultData();
+      state.projects = normalizeProjects(raw ? JSON.parse(raw) : defaultData());
     }catch(e){ state.projects = defaultData(); }
     state.loaded = true;
     render();
@@ -470,6 +495,13 @@
           <button class="sync-btn secondary" id="import-btn">Import from file</button>
           <input type="file" id="import-file" accept="application/json" style="display:none" />
         </div>
+        ${state.importPending ? `
+        <div class="sync-sub" style="color:var(--gold); margin-top:10px;">This will replace the data on this device with the imported file (${state.importPending.length} project${state.importPending.length===1?'':'s'}).</div>
+        <div class="sync-btn-row">
+          <button class="sync-btn" id="import-confirm-btn">Replace with imported data</button>
+          <button class="sync-btn secondary" id="import-cancel-btn">Cancel</button>
+        </div>` : ''}
+        ${state.importStatus ? `<div class="sync-sub" style="color:${state.importStatus.startsWith('error:') ? 'var(--pink)' : 'var(--forest)'}; margin-top:10px;">${escapeHtml(state.importStatus.replace(/^(error|ok):/,''))}</div>` : ''}
       </div>`;
   }
 
@@ -484,15 +516,24 @@
           <div class="proj-sub">${doneCt} of ${p.tasks.length} tasks</div>
         </button>`;
     }).join('');
+    const addTile = state.addingProject ? `
+        <div class="proj-card add-card" style="border-style:solid; cursor:default;">
+          <input type="text" id="new-project-input" placeholder="Project name…" style="width:100%; text-align:center; background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:8px 6px; color:var(--ink); font-size:13px;" />
+          <div style="display:flex; gap:6px; width:100%;">
+            <button id="new-project-save" style="flex:1; border:none; background:var(--teal); color:#fff; border-radius:8px; padding:7px; font-size:12px; font-weight:600; font-family:var(--font-display);">Add</button>
+            <button id="new-project-cancel" style="flex:1; border:1px solid var(--line); background:transparent; color:var(--ink-soft); border-radius:8px; padding:7px; font-size:12px;">Cancel</button>
+          </div>
+        </div>` : `
+        <button class="proj-card add-card" id="add-project-btn">
+          <div class="plus">+</div>
+          <div class="proj-name">New project</div>
+        </button>`;
     return `
       <div class="section-title">Your Projects</div>
       <div class="section-sub">Tap a project to see its scope, tasks, and notes.</div>
       <div class="proj-grid">
         ${cards}
-        <button class="proj-card add-card" id="add-project-btn">
-          <div class="plus">+</div>
-          <div class="proj-name">New project</div>
-        </button>
+        ${addTile}
       </div>`;
   }
 
@@ -546,11 +587,32 @@
       </div>
 
       <div class="danger-zone">
-        <button class="sync-btn danger" id="delete-project-btn">Delete project</button>
+        <button class="sync-btn danger" id="delete-project-btn">${state.deleteArmed ? 'Tap again to permanently delete' : 'Delete project'}</button>
       </div>`;
   }
 
   function render(){
+    try{
+      renderInner();
+    }catch(e){
+      root.innerHTML = `
+        <div style="padding:32px 20px; color:#ECEFE9; font-family:sans-serif; max-width:480px; margin:0 auto;">
+          <div style="font-weight:700; font-size:18px; margin-bottom:8px;">Something went wrong</div>
+          <div style="color:#8B968D; font-size:13px; margin-bottom:18px; line-height:1.5;">The app hit an error trying to display your data. If you're signed in for sync, your data is safe in the cloud. Try reloading first — if it keeps happening, resetting this device's local copy usually fixes it (it will re-download from the cloud once you sign in again).</div>
+          <button id="recover-reload-btn" style="width:100%; margin-bottom:10px; border:none; background:#3EBBA9; color:#fff; border-radius:12px; padding:13px; font-weight:600; font-size:14px;">Reload</button>
+          <button id="recover-reset-btn" style="width:100%; border:1px solid #2E342B; background:transparent; color:#ECEFE9; border-radius:12px; padding:13px; font-size:14px;">Reset local data &amp; reload</button>
+        </div>`;
+      const reloadBtn = document.getElementById('recover-reload-btn');
+      if(reloadBtn) reloadBtn.addEventListener('click', () => location.reload());
+      const resetBtn = document.getElementById('recover-reset-btn');
+      if(resetBtn) resetBtn.addEventListener('click', () => {
+        try{ localStorage.removeItem(STORAGE_KEY); }catch(err){}
+        location.reload();
+      });
+    }
+  }
+
+  function renderInner(){
     if(!state.loaded){ root.innerHTML = '<div style="padding:40px;color:#8B968D;">Loading…</div>'; return; }
 
     let bodyHtml;
@@ -584,11 +646,11 @@
       </div>`;
 
     root.querySelector('#sync-icon-btn').addEventListener('click', () => { state.view='sync'; render(); window.scrollTo(0,0); });
-    root.querySelector('#nav-home').addEventListener('click', () => { state.view='home'; state.activeProject=null; render(); window.scrollTo(0,0); });
+    root.querySelector('#nav-home').addEventListener('click', () => { state.view='home'; state.activeProject=null; state.deleteArmed=false; render(); window.scrollTo(0,0); });
     root.querySelector('#nav-sync').addEventListener('click', () => { state.view='sync'; render(); window.scrollTo(0,0); });
 
     const backBtn = root.querySelector('#back-btn');
-    if(backBtn) backBtn.addEventListener('click', () => { state.view='home'; state.activeProject=null; render(); window.scrollTo(0,0); });
+    if(backBtn) backBtn.addEventListener('click', () => { state.view='home'; state.activeProject=null; state.deleteArmed=false; render(); window.scrollTo(0,0); });
 
     if(state.view === 'sync'){
       const syncNowBtn = root.querySelector('#sync-now-btn');
@@ -611,6 +673,15 @@
         if(file) importDataFromFile(file);
         e.target.value = '';
       });
+      const importConfirmBtn = root.querySelector('#import-confirm-btn');
+      const importCancelBtn = root.querySelector('#import-cancel-btn');
+      if(importConfirmBtn) importConfirmBtn.addEventListener('click', () => {
+        state.projects = normalizeProjects(state.importPending);
+        state.importPending = null;
+        state.importStatus = 'ok:Import complete.';
+        save();
+      });
+      if(importCancelBtn) importCancelBtn.addEventListener('click', () => { state.importPending = null; render(); });
       return;
     }
 
@@ -619,10 +690,29 @@
         btn.addEventListener('click', () => {
           state.activeProject = btn.getAttribute('data-open');
           state.view = 'project';
+          state.deleteArmed = false;
           render(); window.scrollTo(0,0);
         });
       });
-      root.querySelector('#add-project-btn').addEventListener('click', addProject);
+      if(state.addingProject){
+        const input = root.querySelector('#new-project-input');
+        const saveBtn = root.querySelector('#new-project-save');
+        const cancelBtn = root.querySelector('#new-project-cancel');
+        if(input) input.focus();
+        const doSave = () => {
+          const v = input.value.trim();
+          if(!v) return;
+          addProject(v);
+        };
+        saveBtn.addEventListener('click', doSave);
+        cancelBtn.addEventListener('click', () => { state.addingProject = false; render(); });
+        input.addEventListener('keydown', e => {
+          if(e.key === 'Enter') doSave();
+          if(e.key === 'Escape'){ state.addingProject = false; render(); }
+        });
+      } else {
+        root.querySelector('#add-project-btn').addEventListener('click', () => { state.addingProject = true; render(); });
+      }
       return;
     }
 
@@ -665,24 +755,27 @@
       taskInput.addEventListener('keydown', e => { if(e.key==='Enter') doAddTask(); });
 
       root.querySelector('#delete-project-btn').addEventListener('click', () => {
-        const ok = confirm(`Delete "${p.name}" and all its tasks/notes? This can't be undone.`);
-        if(!ok) return;
+        if(!state.deleteArmed){
+          state.deleteArmed = true;
+          render();
+          return;
+        }
         state.projects = state.projects.filter(x => x.id !== p.id);
         state.view = 'home';
         state.activeProject = null;
+        state.deleteArmed = false;
         save();
       });
     }
   }
 
-  function addProject(){
-    const name = prompt('Project name:');
-    if(!name || !name.trim()) return;
+  function addProject(name){
     const color = COLORS[state.projects.length % COLORS.length];
     const newP = { id: makeId(), name: name.trim(), color, scope: '', notes: '', tasks: [] };
     state.projects.push(newP);
     state.activeProject = newP.id;
     state.view = 'project';
+    state.addingProject = false;
     save();
   }
 
@@ -705,15 +798,13 @@
       try{
         const parsed = JSON.parse(reader.result);
         const incoming = (parsed && parsed.projects) ? parsed.projects : parsed;
-        const looksValid = Array.isArray(incoming);
-        if(!looksValid) throw new Error('unrecognized format');
-        const ok = confirm('Import will replace the data currently on this device with the file you selected. Continue?');
-        if(!ok) return;
-        state.projects = incoming;
-        save();
-        alert('Import complete.');
+        if(!Array.isArray(incoming)) throw new Error('unrecognized format');
+        state.importPending = normalizeProjects(incoming);
+        state.importStatus = '';
+        render();
       }catch(e){
-        alert('Could not read that file — make sure it is a Project Hub export.');
+        state.importStatus = 'error:Could not read that file — make sure it is a Project Hub export.';
+        render();
       }
     };
     reader.readAsText(file);
