@@ -265,6 +265,7 @@
     appId: "1:33381407955:web:f17c861698735bc1914826"
   };
   const SYNC_PATH = 'projecthub';
+  const OWNER_EMAIL = 'chrispolicky@gmail.com';
   let fbDb = null;
 
   let state = {
@@ -272,6 +273,7 @@
     activeProject: null,
     projects: [],
     loaded: false,
+    user: null,
     sync: { status: 'connecting', lastSynced: null }
   };
 
@@ -283,16 +285,37 @@
     try{
       firebase.initializeApp(FIREBASE_CONFIG);
       fbDb = firebase.database();
+      firebase.auth().getRedirectResult().catch(() => {});
       firebase.auth().onAuthStateChanged(user => {
-        if(user) attachSyncListener();
-      });
-      firebase.auth().signInAnonymously().catch(() => {
-        state.sync.status = 'error';
-        render();
+        if(user && user.email === OWNER_EMAIL){
+          state.user = user;
+          attachSyncListener();
+        } else if(user){
+          state.user = null;
+          state.sync.status = 'wrong-account';
+          firebase.auth().signOut();
+          render();
+        } else {
+          state.user = null;
+          state.sync.status = 'signed-out';
+          render();
+        }
       });
     }catch(e){
       state.sync.status = 'error';
     }
+  }
+
+  function signInWithGoogle(){
+    if(typeof firebase === 'undefined') return;
+    const provider = new firebase.auth.GoogleAuthProvider();
+    provider.setCustomParameters({ login_hint: OWNER_EMAIL });
+    firebase.auth().signInWithRedirect(provider);
+  }
+
+  function signOutOfSync(){
+    if(typeof firebase === 'undefined') return;
+    firebase.auth().signOut();
   }
 
   function attachSyncListener(){
@@ -321,7 +344,7 @@
   }
 
   function pushToCloud(){
-    if(!fbDb) return;
+    if(!fbDb || !state.user) return;
     const payload = { projects: state.projects, updatedAt: new Date().toISOString() };
     fbDb.ref(SYNC_PATH).set(payload).then(() => {
       state.sync.lastSynced = payload.updatedAt;
@@ -374,11 +397,13 @@
 
   function syncDotClass(){
     if(state.sync.status === 'connected') return 'ok';
-    if(state.sync.status === 'error' || state.sync.status === 'unavailable') return 'err';
+    if(state.sync.status === 'error' || state.sync.status === 'unavailable' || state.sync.status === 'wrong-account') return 'err';
     return 'pending';
   }
   function syncStatusLabel(){
     if(state.sync.status === 'connected') return 'Synced';
+    if(state.sync.status === 'signed-out') return 'Sign in to sync';
+    if(state.sync.status === 'wrong-account') return 'Wrong Google account';
     if(state.sync.status === 'error') return 'Sync error';
     if(state.sync.status === 'unavailable') return 'Sync unavailable';
     return 'Connecting…';
@@ -419,10 +444,17 @@
           <div class="sync-status-dot ${syncDotClass()}"></div>
           <div class="sync-status-text">${syncStatusLabel()}</div>
         </div>
-        <div class="sync-sub">Last synced: ${relTime(state.sync.lastSynced)}. Changes on this device sync automatically to your other devices when both are online — no downloading or copying files.</div>
+        <div class="sync-sub">Last synced: ${relTime(state.sync.lastSynced)}.</div>
+        ${state.user ? `
+        <div class="sync-sub">Signed in as <strong>${escapeHtml(state.user.email)}</strong>.</div>
         <div class="sync-btn-row">
           <button class="sync-btn" id="sync-now-btn">Sync now</button>
-        </div>
+          <button class="sync-btn secondary" id="sign-out-btn">Sign out</button>
+        </div>` : `
+        <div class="sync-sub">Sign in with Google to sync across your devices. Only ${OWNER_EMAIL} can access this data.</div>
+        <div class="sync-btn-row">
+          <button class="sync-btn" id="sign-in-btn">Sign in with Google</button>
+        </div>`}
       </div>
 
       <div class="sync-page-card">
@@ -554,7 +586,12 @@
     if(backBtn) backBtn.addEventListener('click', () => { state.view='home'; state.activeProject=null; render(); window.scrollTo(0,0); });
 
     if(state.view === 'sync'){
-      root.querySelector('#sync-now-btn').addEventListener('click', () => { pushToCloud(); render(); });
+      const syncNowBtn = root.querySelector('#sync-now-btn');
+      if(syncNowBtn) syncNowBtn.addEventListener('click', () => { pushToCloud(); render(); });
+      const signInBtn = root.querySelector('#sign-in-btn');
+      if(signInBtn) signInBtn.addEventListener('click', signInWithGoogle);
+      const signOutBtn = root.querySelector('#sign-out-btn');
+      if(signOutBtn) signOutBtn.addEventListener('click', signOutOfSync);
       root.querySelector('#export-btn').addEventListener('click', exportData);
       const importBtn = root.querySelector('#import-btn');
       const importFile = root.querySelector('#import-file');
