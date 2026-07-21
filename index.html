@@ -168,11 +168,13 @@
     z-index: 10;
   }
   .nav-btn{
-    flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px;
-    background: none; border: none; padding: 6px 2px; color: var(--ink-soft);
-    font-family: var(--font-body); font-size: 9.5px; font-weight: 500;
+    flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px;
+    background: none; border: none; padding: 6px 1px; color: var(--ink-soft);
+    font-family: var(--font-body); font-size: 8.5px; font-weight: 500;
+    min-width: 0;
   }
-  .nav-btn svg{ width: 20px; height: 20px; }
+  .nav-btn span{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width: 100%; }
+  .nav-btn svg{ width: 18px; height: 18px; }
   .nav-btn.active{ color: var(--teal); }
 
   #hub-b{ padding-bottom: 90px; }
@@ -237,10 +239,24 @@
     const paths = {
       sync: '<path d="M3 12a9 9 0 0115.3-6.4L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 01-15.3 6.4L3 16"/><path d="M3 21v-5h5"/>',
       home: '<path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/>',
-      ai: '<path d="M12 3l1.9 4.9L19 9.8l-4.9 1.9L12 16.6l-1.9-4.9L5 9.8l4.9-1.9L12 3z"/><path d="M19 15l.9 2.3L22.2 18l-2.3.9L19 21.2l-.9-2.3L15.8 18l2.3-.9L19 15z"/>'
+      ai: '<path d="M12 3l1.9 4.9L19 9.8l-4.9 1.9L12 16.6l-1.9-4.9L5 9.8l4.9-1.9L12 3z"/><path d="M19 15l.9 2.3L22.2 18l-2.3.9L19 21.2l-.9-2.3L15.8 18l2.3-.9L19 15z"/>',
+      gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.9l.1.1a2 2 0 11-2.9 2.9l-.1-.1a1.7 1.7 0 00-1.9-.3 1.7 1.7 0 00-1 1.6V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1-1.6 1.7 1.7 0 00-1.9.3l-.1.1a2 2 0 11-2.9-2.9l.1-.1a1.7 1.7 0 00.3-1.9 1.7 1.7 0 00-1.6-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.6-1 1.7 1.7 0 00-.3-1.9l-.1-.1a2 2 0 112.9-2.9l.1.1a1.7 1.7 0 001.9.3H9a1.7 1.7 0 001-1.6V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.6 1.7 1.7 0 001.9-.3l.1-.1a2 2 0 112.9 2.9l-.1.1a1.7 1.7 0 00-.3 1.9V9a1.7 1.7 0 001.6 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.6 1z"/>',
+      wallet: '<rect x="2.5" y="6" width="19" height="13" rx="2.5"/><path d="M2.5 10h19"/><path d="M16 14.2h2.2"/>',
+      book: '<path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/>',
+      target: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.2"/>',
+      todo: '<path d="M9 6h11"/><path d="M9 12h11"/><path d="M9 18h11"/><path d="M4 6l1 1 2-2"/><path d="M4 12l1 1 2-2"/><path d="M4 18l1 1 2-2"/>'
     };
     return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' + paths[name] + '</svg>';
   }
+
+  const TOP_TABS = [
+    { key: 'home', label: 'Home', icon: 'home' },
+    { key: 'projects', label: 'Projects', icon: 'gear' },
+    { key: 'finance', label: 'Finance', icon: 'wallet' },
+    { key: 'school', label: 'School', icon: 'book' },
+    { key: 'todo', label: 'To-Do', icon: 'todo' },
+    { key: 'goals', label: 'Goals', icon: 'target' }
+  ];
 
   function makeId(){ return 'i' + Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
 
@@ -290,7 +306,8 @@
   let fbDb = null;
 
   let state = {
-    view: 'home',
+    tab: 'home',
+    view: 'tab',
     activeProject: null,
     projects: [],
     loaded: false,
@@ -505,7 +522,31 @@
       </div>`;
   }
 
-  function renderHome(){
+  function renderHomeTab(){
+    const total = state.projects.length;
+    const avgPct = total ? Math.round(state.projects.reduce((sum, p) => sum + pct(p.tasks), 0) / total) : 0;
+    return `
+      <div class="hero-card">
+        <div class="ring-wrap">${ringSVG(avgPct, '#3EBBA9')}</div>
+        <div class="hero-text">
+          <div class="hlabel">Overall progress</div>
+          <div class="hsub">${total} active project${total===1?'':'s'} across everything you're tracking</div>
+        </div>
+      </div>
+      <div class="section-title">Welcome back</div>
+      <div class="section-sub">Use the tabs below to jump into Projects, Finance, School, To-Do, or Goals.</div>`;
+  }
+
+  function renderPlaceholderTab(title, subtitle){
+    return `
+      <div class="section-title">${escapeHtml(title)}</div>
+      <div class="section-sub">${escapeHtml(subtitle)}</div>
+      <div class="card">
+        <div class="empty" style="padding:10px 2px;">This section is coming soon — tell me what you want to track here and we'll build it out.</div>
+      </div>`;
+  }
+
+  function renderProjectsTab(){
     const cards = state.projects.map(p => {
       const p2 = pct(p.tasks);
       const doneCt = p.tasks.filter(t=>t.done).length;
@@ -620,10 +661,15 @@
       bodyHtml = renderSyncPage();
     } else if(state.view === 'project'){
       const p = state.projects.find(x => x.id === state.activeProject);
-      if(!p){ state.view = 'home'; bodyHtml = renderHome(); }
+      if(!p){ state.view = 'tab'; state.tab = 'projects'; bodyHtml = renderProjectsTab(); }
       else bodyHtml = renderProject(p);
     } else {
-      bodyHtml = renderHome();
+      if(state.tab === 'projects') bodyHtml = renderProjectsTab();
+      else if(state.tab === 'finance') bodyHtml = renderPlaceholderTab('Finance', 'Budgets, savings goals, and spending.');
+      else if(state.tab === 'school') bodyHtml = renderPlaceholderTab('School', 'Classes, assignments, and deadlines.');
+      else if(state.tab === 'todo') bodyHtml = renderPlaceholderTab('To-Do List', 'Daily tasks and reminders.');
+      else if(state.tab === 'goals') bodyHtml = renderPlaceholderTab('Goals', 'Personal goals and habits you want to build.');
+      else bodyHtml = renderHomeTab();
     }
 
     root.innerHTML = `
@@ -641,16 +687,24 @@
         ${bodyHtml}
       </div>
       <div class="bottom-nav">
-        <button class="nav-btn ${state.view==='home'?'active':''}" id="nav-home">${icon('home')}<span>Home</span></button>
-        <button class="nav-btn ${state.view==='sync'?'active':''}" id="nav-sync">${icon('sync')}<span>Sync</span></button>
+        ${TOP_TABS.map(t => `
+        <button class="nav-btn ${(state.view==='tab' && state.tab===t.key)?'active':''}" data-tab="${t.key}">${icon(t.icon)}<span>${t.label}</span></button>`).join('')}
       </div>`;
 
     root.querySelector('#sync-icon-btn').addEventListener('click', () => { state.view='sync'; render(); window.scrollTo(0,0); });
-    root.querySelector('#nav-home').addEventListener('click', () => { state.view='home'; state.activeProject=null; state.deleteArmed=false; render(); window.scrollTo(0,0); });
-    root.querySelector('#nav-sync').addEventListener('click', () => { state.view='sync'; render(); window.scrollTo(0,0); });
+    root.querySelectorAll('[data-tab]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        state.tab = btn.getAttribute('data-tab');
+        state.view = 'tab';
+        state.activeProject = null;
+        state.deleteArmed = false;
+        state.addingProject = false;
+        render(); window.scrollTo(0,0);
+      });
+    });
 
     const backBtn = root.querySelector('#back-btn');
-    if(backBtn) backBtn.addEventListener('click', () => { state.view='home'; state.activeProject=null; state.deleteArmed=false; render(); window.scrollTo(0,0); });
+    if(backBtn) backBtn.addEventListener('click', () => { state.view='tab'; state.activeProject=null; state.deleteArmed=false; render(); window.scrollTo(0,0); });
 
     if(state.view === 'sync'){
       const syncNowBtn = root.querySelector('#sync-now-btn');
@@ -685,7 +739,7 @@
       return;
     }
 
-    if(state.view === 'home'){
+    if(state.view === 'tab' && state.tab === 'projects'){
       root.querySelectorAll('[data-open]').forEach(btn => {
         btn.addEventListener('click', () => {
           state.activeProject = btn.getAttribute('data-open');
@@ -761,7 +815,8 @@
           return;
         }
         state.projects = state.projects.filter(x => x.id !== p.id);
-        state.view = 'home';
+        state.view = 'tab';
+        state.tab = 'projects';
         state.activeProject = null;
         state.deleteArmed = false;
         save();
