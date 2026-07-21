@@ -320,10 +320,24 @@
   function budgetPct(b){ return b.limit ? Math.round((spentOf(b) / b.limit) * 100) : 0; }
   function budgetBarColor(p){ if(p >= 100) return 'var(--pink)'; if(p >= 80) return 'var(--gold)'; return 'var(--teal)'; }
   function fmtMoney(n){ return '$' + toMoney(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
-  function barHTML(p, big){
+  function barHTML(p, big, color){
     const clamped = Math.min(100, Math.max(0, p));
-    return `<div class="bar-track" style="height:${big ? '12px' : '8px'}"><div class="bar-fill" style="width:${clamped}%; background:${budgetBarColor(p)};"></div></div>`;
+    return `<div class="bar-track" style="height:${big ? '12px' : '8px'}"><div class="bar-fill" style="width:${clamped}%; background:${color};"></div></div>`;
   }
+
+  function normalizeSavingsGoal(g){
+    g = g || {};
+    return {
+      id: g.id || makeId(),
+      name: g.name || 'Untitled goal',
+      target: toMoney(g.target),
+      contributions: asArray(g.contributions).map(c => ({ id: (c && c.id) || makeId(), amount: toMoney(c && c.amount), note: (c && c.note) || '' }))
+    };
+  }
+  function normalizeSavingsGoals(list){ return asArray(list).map(normalizeSavingsGoal); }
+  function savedOf(g){ return g.contributions.reduce((sum, c) => sum + c.amount, 0); }
+  function savingsPct(g){ return g.target ? Math.round((savedOf(g) / g.target) * 100) : 0; }
+  function savingsBarColor(p){ return p >= 100 ? 'var(--forest)' : 'var(--teal)'; }
 
   const FIREBASE_CONFIG = {
     apiKey: "AIzaSyCNVjKV-vf1bdAbEQwqXZufktjqvF9kxRc",
@@ -345,6 +359,8 @@
     projects: [],
     activeBudget: null,
     budgets: [],
+    activeSavingsGoal: null,
+    savingsGoals: [],
     loaded: false,
     user: null,
     passcodeError: '',
@@ -353,6 +369,8 @@
     addingBudget: false,
     addingBudgetPeriod: null,
     budgetDeleteArmed: false,
+    addingSavingsGoal: false,
+    savingsDeleteArmed: false,
     importPending: null,
     importStatus: '',
     sync: { status: 'connecting', lastSynced: null }
@@ -405,8 +423,8 @@
     fbDb.ref(SYNC_PATH).on('value', snap => {
       const val = snap.val();
       if(!val || !val.projects){ render(); return; }
-      const incomingStr = JSON.stringify({ projects: val.projects, budgets: val.budgets });
-      if(incomingStr === JSON.stringify({ projects: state.projects, budgets: state.budgets })){
+      const incomingStr = JSON.stringify({ projects: val.projects, budgets: val.budgets, savingsGoals: val.savingsGoals });
+      if(incomingStr === JSON.stringify({ projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals })){
         state.sync.lastSynced = val.updatedAt || new Date().toISOString();
         render();
         return;
@@ -417,8 +435,9 @@
       }
       state.projects = normalizeProjects(val.projects);
       state.budgets = normalizeBudgets(val.budgets);
+      state.savingsGoals = normalizeSavingsGoals(val.savingsGoals);
       state.sync.lastSynced = val.updatedAt || new Date().toISOString();
-      try{ localStorage.setItem(STORAGE_KEY, JSON.stringify({ projects: state.projects, budgets: state.budgets })); }catch(e){}
+      try{ localStorage.setItem(STORAGE_KEY, JSON.stringify({ projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals })); }catch(e){}
       render();
     }, () => {
       state.sync.status = 'error';
@@ -428,7 +447,7 @@
 
   function pushToCloud(){
     if(!fbDb || !state.user) return;
-    const payload = { projects: state.projects, budgets: state.budgets, updatedAt: new Date().toISOString() };
+    const payload = { projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, updatedAt: new Date().toISOString() };
     fbDb.ref(SYNC_PATH).set(payload).then(() => {
       state.sync.lastSynced = payload.updatedAt;
     }).catch(() => {
@@ -442,23 +461,26 @@
       const raw = localStorage.getItem(STORAGE_KEY);
       const parsed = raw ? JSON.parse(raw) : null;
       if(Array.isArray(parsed)){
-        // old storage shape: a bare projects array, from before budgets existed
+        // old storage shape: a bare projects array, from before budgets/savings existed
         state.projects = normalizeProjects(parsed);
         state.budgets = [];
+        state.savingsGoals = [];
       } else if(parsed){
         state.projects = normalizeProjects(parsed.projects);
         state.budgets = normalizeBudgets(parsed.budgets);
+        state.savingsGoals = normalizeSavingsGoals(parsed.savingsGoals);
       } else {
         state.projects = defaultData();
         state.budgets = [];
+        state.savingsGoals = [];
       }
-    }catch(e){ state.projects = defaultData(); state.budgets = []; }
+    }catch(e){ state.projects = defaultData(); state.budgets = []; state.savingsGoals = []; }
     state.loaded = true;
     render();
     initFirebase();
   }
   function save(rerender){
-    try{ localStorage.setItem(STORAGE_KEY, JSON.stringify({ projects: state.projects, budgets: state.budgets })); }catch(e){}
+    try{ localStorage.setItem(STORAGE_KEY, JSON.stringify({ projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals })); }catch(e){}
     pushToCloud();
     if(rerender !== false) render();
   }
@@ -563,7 +585,7 @@
           <input type="file" id="import-file" accept="application/json" style="display:none" />
         </div>
         ${state.importPending ? `
-        <div class="sync-sub" style="color:var(--gold); margin-top:10px;">This will replace the data on this device with the imported file (${state.importPending.projects.length} project${state.importPending.projects.length===1?'':'s'}, ${state.importPending.budgets.length} budget${state.importPending.budgets.length===1?'':'s'}).</div>
+        <div class="sync-sub" style="color:var(--gold); margin-top:10px;">This will replace the data on this device with the imported file (${state.importPending.projects.length} project${state.importPending.projects.length===1?'':'s'}, ${state.importPending.budgets.length} budget${state.importPending.budgets.length===1?'':'s'}, ${state.importPending.savingsGoals.length} savings goal${state.importPending.savingsGoals.length===1?'':'s'}).</div>
         <div class="sync-btn-row">
           <button class="sync-btn" id="import-confirm-btn">Replace with imported data</button>
           <button class="sync-btn secondary" id="import-cancel-btn">Cancel</button>
@@ -607,7 +629,7 @@
             <div style="font-weight:600; font-size:14.5px;">${escapeHtml(b.name)}</div>
             <div style="font-family:var(--font-mono); font-size:12px; color:var(--ink-soft); white-space:nowrap;">${fmtMoney(spent)} / ${fmtMoney(b.limit)}</div>
           </div>
-          ${barHTML(p)}
+          ${barHTML(p, false, budgetBarColor(p))}
         </button>`;
     }).join('');
 
@@ -633,13 +655,92 @@
       ${addForm}`;
   }
 
+  function renderSavingsSection(){
+    const rows = state.savingsGoals.map(g => {
+      const saved = savedOf(g);
+      const p = savingsPct(g);
+      return `
+        <button class="item-card" style="display:block; width:100%; text-align:left; border-left-color:${savingsBarColor(p)};" data-open-savings="${g.id}">
+          <div style="display:flex; justify-content:space-between; align-items:baseline; gap:8px; margin-bottom:10px;">
+            <div style="font-weight:600; font-size:14.5px;">${escapeHtml(g.name)}</div>
+            <div style="font-family:var(--font-mono); font-size:12px; color:var(--ink-soft); white-space:nowrap;">${fmtMoney(saved)} / ${fmtMoney(g.target)}</div>
+          </div>
+          ${barHTML(p, false, savingsBarColor(p))}
+        </button>`;
+    }).join('');
+
+    const addForm = state.addingSavingsGoal ? `
+      <div class="card">
+        <div class="k">New Savings Goal</div>
+        <input type="text" id="new-savings-name" placeholder="Goal name (e.g. Emergency fund)" class="money-input" style="margin-bottom:8px;" />
+        <input type="number" id="new-savings-target" placeholder="Target amount ($)" inputmode="decimal" class="money-input" style="margin-bottom:12px;" />
+        <div class="sync-btn-row">
+          <button class="sync-btn" id="new-savings-save">Add goal</button>
+          <button class="sync-btn secondary" id="new-savings-cancel">Cancel</button>
+        </div>
+      </div>` : `
+      <button class="card" id="add-savings-btn" style="width:100%; text-align:center; color:var(--ink-soft); cursor:pointer;">
+        <div style="font-size:20px; font-family:var(--font-display); line-height:1;">+</div>
+        <div style="font-family:var(--font-display); font-weight:600; font-size:12.5px; margin-top:4px;">New savings goal</div>
+      </button>`;
+
+    return `
+      <div class="section-title" style="font-size:16px; margin-top:22px;">Savings Goals</div>
+      ${rows || '<div class="empty">No savings goals yet.</div>'}
+      ${addForm}`;
+  }
+
   function renderFinanceTab(){
     return `
       <div class="section-title">Finance</div>
       <div class="section-sub">Track spending against what you've budgeted, split by how often it resets.</div>
       ${renderBudgetSection('weekly', 'Weekly')}
       ${renderBudgetSection('monthly', 'Monthly')}
-      ${renderBudgetSection('yearly', 'Yearly')}`;
+      ${renderBudgetSection('yearly', 'Yearly')}
+      ${renderSavingsSection()}`;
+  }
+
+  function renderSavingsGoalDetail(g){
+    const saved = savedOf(g);
+    const p = savingsPct(g);
+    const remaining = g.target - saved;
+    const contribRows = g.contributions.slice().reverse().map(c => `
+      <div class="item-card" style="border-left-color:${savingsBarColor(p)};">
+        <div class="row">
+          <div class="txt">${escapeHtml(c.note || 'Contribution')}</div>
+          <div style="font-family:var(--font-mono); font-size:13px; padding-top:2px;">${fmtMoney(c.amount)}</div>
+          <div class="btn-row">
+            <button class="icon-btn" data-del-contrib="${c.id}">✕</button>
+          </div>
+        </div>
+      </div>`).join('');
+
+    return `
+      <button class="back-link" id="back-btn">← Finance</button>
+
+      <div class="hero-card" style="display:block;">
+        <div class="hlabel">${escapeHtml(g.name)}</div>
+        <div class="hsub" style="margin-bottom:12px;">${fmtMoney(saved)} of ${fmtMoney(g.target)} saved ${p >= 100 ? '— goal reached!' : '— ' + fmtMoney(remaining) + ' to go'}</div>
+        ${barHTML(p, true, savingsBarColor(p))}
+      </div>
+
+      <div class="section-title" style="font-size:16px;">Contributions</div>
+      <div class="section-sub">Add what you put toward this goal and watch the bar move.</div>
+      ${g.contributions.length ? contribRows : '<div class="empty">No contributions logged yet.</div>'}
+      <div class="add-row">
+        <input type="number" id="contrib-amount" placeholder="Amount" inputmode="decimal" style="max-width:100px;" />
+        <input type="text" id="contrib-note" placeholder="Note (optional)" />
+        <button id="add-contrib-btn">Add</button>
+      </div>
+
+      <div class="card" style="margin-top:20px;">
+        <div class="k">Target amount</div>
+        <input type="number" id="edit-savings-target" value="${g.target}" inputmode="decimal" class="money-input" />
+      </div>
+
+      <div class="danger-zone">
+        <button class="sync-btn danger" id="delete-savings-btn">${state.savingsDeleteArmed ? 'Tap again to permanently delete' : 'Delete goal'}</button>
+      </div>`;
   }
 
   function renderBudgetDetail(b){
@@ -663,7 +764,7 @@
       <div class="hero-card" style="display:block;">
         <div class="hlabel">${escapeHtml(b.name)}</div>
         <div class="hsub" style="margin-bottom:12px;">${fmtMoney(spent)} of ${fmtMoney(b.limit)} spent — ${remaining >= 0 ? fmtMoney(remaining) + ' left' : fmtMoney(-remaining) + ' over budget'}</div>
-        ${barHTML(p, true)}
+        ${barHTML(p, true, budgetBarColor(p))}
       </div>
 
       <div class="section-title" style="font-size:16px;">Expenses</div>
@@ -806,6 +907,10 @@
       const b = state.budgets.find(x => x.id === state.activeBudget);
       if(!b){ state.view = 'tab'; state.tab = 'finance'; bodyHtml = renderFinanceTab(); }
       else bodyHtml = renderBudgetDetail(b);
+    } else if(state.view === 'savings'){
+      const g = state.savingsGoals.find(x => x.id === state.activeSavingsGoal);
+      if(!g){ state.view = 'tab'; state.tab = 'finance'; bodyHtml = renderFinanceTab(); }
+      else bodyHtml = renderSavingsGoalDetail(g);
     } else {
       if(state.tab === 'projects') bodyHtml = renderProjectsTab();
       else if(state.tab === 'finance') bodyHtml = renderFinanceTab();
@@ -846,6 +951,9 @@
         state.budgetDeleteArmed = false;
         state.addingBudget = false;
         state.addingBudgetPeriod = null;
+        state.activeSavingsGoal = null;
+        state.savingsDeleteArmed = false;
+        state.addingSavingsGoal = false;
         render(); window.scrollTo(0,0);
       });
     });
@@ -857,6 +965,8 @@
       state.deleteArmed=false;
       state.activeBudget=null;
       state.budgetDeleteArmed=false;
+      state.activeSavingsGoal=null;
+      state.savingsDeleteArmed=false;
       render(); window.scrollTo(0,0);
     });
 
@@ -886,6 +996,7 @@
       if(importConfirmBtn) importConfirmBtn.addEventListener('click', () => {
         state.projects = state.importPending.projects;
         state.budgets = state.importPending.budgets;
+        state.savingsGoals = state.importPending.savingsGoals;
         state.importPending = null;
         state.importStatus = 'ok:Import complete.';
         save();
@@ -956,6 +1067,80 @@
           state.addingBudgetPeriod = btn.getAttribute('data-add-budget');
           render();
         });
+      });
+
+      root.querySelectorAll('[data-open-savings]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          state.activeSavingsGoal = btn.getAttribute('data-open-savings');
+          state.view = 'savings';
+          state.savingsDeleteArmed = false;
+          render(); window.scrollTo(0,0);
+        });
+      });
+      if(state.addingSavingsGoal){
+        const nameInput = root.querySelector('#new-savings-name');
+        const targetInput = root.querySelector('#new-savings-target');
+        const saveBtn = root.querySelector('#new-savings-save');
+        const cancelBtn = root.querySelector('#new-savings-cancel');
+        if(nameInput) nameInput.focus();
+        const doSave = () => {
+          const name = nameInput.value.trim();
+          const target = toMoney(targetInput.value);
+          if(!name || target <= 0) return;
+          addSavingsGoal(name, target);
+        };
+        saveBtn.addEventListener('click', doSave);
+        cancelBtn.addEventListener('click', () => { state.addingSavingsGoal = false; render(); });
+        targetInput.addEventListener('keydown', e => { if(e.key === 'Enter') doSave(); });
+      } else {
+        const addSavingsBtn = root.querySelector('#add-savings-btn');
+        if(addSavingsBtn) addSavingsBtn.addEventListener('click', () => { state.addingSavingsGoal = true; render(); });
+      }
+      return;
+    }
+
+    if(state.view === 'savings'){
+      const g = state.savingsGoals.find(x => x.id === state.activeSavingsGoal);
+      if(!g) return;
+
+      root.querySelector('#edit-savings-target').addEventListener('blur', e => {
+        g.target = toMoney(e.target.value);
+        save();
+      });
+
+      root.querySelectorAll('[data-del-contrib]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const id = btn.getAttribute('data-del-contrib');
+          g.contributions = g.contributions.filter(x => x.id !== id);
+          save();
+        });
+      });
+
+      const contribAmount = root.querySelector('#contrib-amount');
+      const contribNote = root.querySelector('#contrib-note');
+      const addContribBtn = root.querySelector('#add-contrib-btn');
+      const doAddContrib = () => {
+        const amount = toMoney(contribAmount.value);
+        if(amount <= 0) return;
+        g.contributions.push({ id: makeId(), amount, note: contribNote.value.trim() });
+        save();
+      };
+      addContribBtn.addEventListener('click', doAddContrib);
+      contribNote.addEventListener('keydown', e => { if(e.key === 'Enter') doAddContrib(); });
+      contribAmount.addEventListener('keydown', e => { if(e.key === 'Enter') doAddContrib(); });
+
+      root.querySelector('#delete-savings-btn').addEventListener('click', () => {
+        if(!state.savingsDeleteArmed){
+          state.savingsDeleteArmed = true;
+          render();
+          return;
+        }
+        state.savingsGoals = state.savingsGoals.filter(x => x.id !== g.id);
+        state.view = 'tab';
+        state.tab = 'finance';
+        state.activeSavingsGoal = null;
+        state.savingsDeleteArmed = false;
+        save();
       });
       return;
     }
@@ -1080,8 +1265,17 @@
     save();
   }
 
+  function addSavingsGoal(name, target){
+    const newG = { id: makeId(), name: name.trim(), target, contributions: [] };
+    state.savingsGoals.push(newG);
+    state.activeSavingsGoal = newG.id;
+    state.view = 'savings';
+    state.addingSavingsGoal = false;
+    save();
+  }
+
   function exportData(){
-    const payload = { app: 'project-hub', version: 1, exportedAt: new Date().toISOString(), projects: state.projects, budgets: state.budgets };
+    const payload = { app: 'project-hub', version: 1, exportedAt: new Date().toISOString(), projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -1102,7 +1296,8 @@
         if(!Array.isArray(incomingProjects)) throw new Error('unrecognized format');
         state.importPending = {
           projects: normalizeProjects(incomingProjects),
-          budgets: normalizeBudgets(parsed && parsed.budgets)
+          budgets: normalizeBudgets(parsed && parsed.budgets),
+          savingsGoals: normalizeSavingsGoals(parsed && parsed.savingsGoals)
         };
         state.importStatus = '';
         render();
