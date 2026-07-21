@@ -46,7 +46,7 @@
     color: var(--ink);
     background: var(--bg);
     min-height: 100vh;
-    padding: 22px 16px 40px;
+    padding: calc(22px + env(safe-area-inset-top, 0px)) 16px 40px;
     line-height: 1.5;
     position: relative;
   }
