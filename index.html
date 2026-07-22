@@ -252,13 +252,15 @@
       target: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.2"/>',
       todo: '<path d="M9 6h11"/><path d="M9 12h11"/><path d="M9 18h11"/><path d="M4 6l1 1 2-2"/><path d="M4 12l1 1 2-2"/><path d="M4 18l1 1 2-2"/>',
       cart: '<circle cx="9" cy="20" r="1.3"/><circle cx="18" cy="20" r="1.3"/><path d="M2.5 3h2l2.3 12a2 2 0 002 1.7h8.7a2 2 0 002-1.6L21 8H6.5"/>',
-      pot: '<path d="M4 10h16l-1.2 8.2A2 2 0 0117 20H7a2 2 0 01-1.8-1.8z"/><path d="M2 10h20"/><path d="M8 10V6.5A4 4 0 0112 2.5h0a4 4 0 014 3.5V10"/>'
+      pot: '<path d="M4 10h16l-1.2 8.2A2 2 0 0117 20H7a2 2 0 01-1.8-1.8z"/><path d="M2 10h20"/><path d="M8 10V6.5A4 4 0 0112 2.5h0a4 4 0 014 3.5V10"/>',
+      calendar: '<rect x="3" y="4.5" width="18" height="16" rx="2.5"/><path d="M16 2.5v4M8 2.5v4M3 10h18"/>'
     };
     return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' + paths[name] + '</svg>';
   }
 
   const TOP_TABS = [
     { key: 'home', label: 'Home', icon: 'home' },
+    { key: 'calendar', label: 'Calendar', icon: 'calendar' },
     { key: 'projects', label: 'Projects', icon: 'gear' },
     { key: 'finance', label: 'Finance', icon: 'wallet' },
     { key: 'school', label: 'School', icon: 'book' },
@@ -477,6 +479,46 @@
     return buckets;
   }
 
+  const SEED_CALENDAR_BLOCKS = [
+    { title: 'Morning routine', start: '06:30', end: '07:30', recurring: true, color: '#3EBBA9' },
+    { title: 'Internship', start: '08:00', end: '17:00', recurring: true, color: '#7C81F5' },
+    { title: 'Workout', start: '17:30', end: '18:30', recurring: true, color: '#F2836E' },
+    { title: 'Dinner', start: '19:00', end: '19:30', recurring: true, color: '#E8B23D' },
+    { title: 'Project time', start: '20:00', end: '21:30', recurring: true, color: '#EA7EB0' }
+  ];
+  function defaultCalendarBlocks(){
+    return SEED_CALENDAR_BLOCKS.map(b => ({ id: makeId(), title: b.title, start: b.start, end: b.end, recurring: b.recurring, date: null, color: b.color }));
+  }
+  function normalizeCalendarBlock(b){
+    b = b || {};
+    return {
+      id: b.id || makeId(),
+      title: b.title || 'Untitled',
+      start: /^\d{2}:\d{2}$/.test(b.start) ? b.start : '09:00',
+      end: /^\d{2}:\d{2}$/.test(b.end) ? b.end : '10:00',
+      recurring: !!b.recurring,
+      date: b.recurring ? null : (b.date || null),
+      color: b.color || COLORS[0]
+    };
+  }
+  function normalizeCalendarBlocks(list){ return asArray(list).map(normalizeCalendarBlock); }
+  function isoDate(d){ return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
+  function timeToMinutes(t){ const [h,m] = t.split(':').map(Number); return h*60+m; }
+  function fmtTime(t){
+    const mins = timeToMinutes(t);
+    const h = Math.floor(mins/60), m = mins%60;
+    const period = h < 12 ? 'AM' : 'PM';
+    const h12 = h % 12 === 0 ? 12 : h % 12;
+    return h12 + (m ? ':' + String(m).padStart(2,'0') : '') + ' ' + period;
+  }
+  function blocksForDate(dateObj){
+    const iso = isoDate(dateObj);
+    return state.calendarBlocks
+      .filter(b => b.recurring || b.date === iso)
+      .slice()
+      .sort((a,b) => timeToMinutes(a.start) - timeToMinutes(b.start));
+  }
+
   const FIREBASE_CONFIG = {
     apiKey: "AIzaSyCNVjKV-vf1bdAbEQwqXZufktjqvF9kxRc",
     authDomain: "personal-goals-app-32e5b.firebaseapp.com",
@@ -500,6 +542,11 @@
     activeSavingsGoal: null,
     savingsGoals: [],
     earnings: [],
+    calendarBlocks: [],
+    calendarDate: isoDate(new Date()),
+    activeCalendarBlock: null,
+    addingCalendarBlock: false,
+    calendarBlockDeleteArmed: false,
     loaded: false,
     user: null,
     passcodeError: '',
@@ -562,8 +609,8 @@
     fbDb.ref(SYNC_PATH).on('value', snap => {
       const val = snap.val();
       if(!val || !val.projects){ render(); return; }
-      const incomingStr = JSON.stringify({ projects: val.projects, budgets: val.budgets, savingsGoals: val.savingsGoals, earnings: val.earnings });
-      if(incomingStr === JSON.stringify({ projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings })){
+      const incomingStr = JSON.stringify({ projects: val.projects, budgets: val.budgets, savingsGoals: val.savingsGoals, earnings: val.earnings, calendarBlocks: val.calendarBlocks });
+      if(incomingStr === JSON.stringify({ projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings, calendarBlocks: state.calendarBlocks })){
         state.sync.lastSynced = val.updatedAt || new Date().toISOString();
         render();
         return;
@@ -576,8 +623,9 @@
       state.budgets = normalizeBudgets(val.budgets);
       state.savingsGoals = normalizeSavingsGoals(val.savingsGoals);
       state.earnings = normalizeEarnings(val.earnings);
+      state.calendarBlocks = normalizeCalendarBlocks(val.calendarBlocks);
       state.sync.lastSynced = val.updatedAt || new Date().toISOString();
-      try{ localStorage.setItem(STORAGE_KEY, JSON.stringify({ projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings })); }catch(e){}
+      try{ localStorage.setItem(STORAGE_KEY, JSON.stringify({ projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings, calendarBlocks: state.calendarBlocks })); }catch(e){}
       render();
     }, () => {
       state.sync.status = 'error';
@@ -587,7 +635,7 @@
 
   function pushToCloud(){
     if(!fbDb || !state.user) return;
-    const payload = { projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings, updatedAt: new Date().toISOString() };
+    const payload = { projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings, calendarBlocks: state.calendarBlocks, updatedAt: new Date().toISOString() };
     fbDb.ref(SYNC_PATH).set(payload).then(() => {
       state.sync.lastSynced = payload.updatedAt;
     }).catch(() => {
@@ -606,24 +654,27 @@
         state.budgets = [];
         state.savingsGoals = [];
         state.earnings = [];
+        state.calendarBlocks = defaultCalendarBlocks();
       } else if(parsed){
         state.projects = normalizeProjects(parsed.projects);
         state.budgets = normalizeBudgets(parsed.budgets);
         state.savingsGoals = normalizeSavingsGoals(parsed.savingsGoals);
         state.earnings = normalizeEarnings(parsed.earnings);
+        state.calendarBlocks = parsed.calendarBlocks ? normalizeCalendarBlocks(parsed.calendarBlocks) : defaultCalendarBlocks();
       } else {
         state.projects = defaultData();
         state.budgets = [];
         state.savingsGoals = [];
         state.earnings = [];
+        state.calendarBlocks = defaultCalendarBlocks();
       }
-    }catch(e){ state.projects = defaultData(); state.budgets = []; state.savingsGoals = []; state.earnings = []; }
+    }catch(e){ state.projects = defaultData(); state.budgets = []; state.savingsGoals = []; state.earnings = []; state.calendarBlocks = defaultCalendarBlocks(); }
     state.loaded = true;
     render();
     initFirebase();
   }
   function save(rerender){
-    try{ localStorage.setItem(STORAGE_KEY, JSON.stringify({ projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings })); }catch(e){}
+    try{ localStorage.setItem(STORAGE_KEY, JSON.stringify({ projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings, calendarBlocks: state.calendarBlocks })); }catch(e){}
     pushToCloud();
     if(rerender !== false) render();
   }
@@ -728,7 +779,7 @@
           <input type="file" id="import-file" accept="application/json" style="display:none" />
         </div>
         ${state.importPending ? `
-        <div class="sync-sub" style="color:var(--gold); margin-top:10px;">This will replace the data on this device with the imported file (${state.importPending.projects.length} project${state.importPending.projects.length===1?'':'s'}, ${state.importPending.budgets.length} budget${state.importPending.budgets.length===1?'':'s'}, ${state.importPending.savingsGoals.length} savings goal${state.importPending.savingsGoals.length===1?'':'s'}, ${state.importPending.earnings.length} earning${state.importPending.earnings.length===1?'':'s'}).</div>
+        <div class="sync-sub" style="color:var(--gold); margin-top:10px;">This will replace the data on this device with the imported file (${state.importPending.projects.length} project${state.importPending.projects.length===1?'':'s'}, ${state.importPending.budgets.length} budget${state.importPending.budgets.length===1?'':'s'}, ${state.importPending.savingsGoals.length} savings goal${state.importPending.savingsGoals.length===1?'':'s'}, ${state.importPending.earnings.length} earning${state.importPending.earnings.length===1?'':'s'}, ${state.importPending.calendarBlocks.length} calendar block${state.importPending.calendarBlocks.length===1?'':'s'}).</div>
         <div class="sync-btn-row">
           <button class="sync-btn" id="import-confirm-btn">Replace with imported data</button>
           <button class="sync-btn secondary" id="import-cancel-btn">Cancel</button>
@@ -750,6 +801,112 @@
       </div>
       <div class="section-title">Welcome back</div>
       <div class="section-sub">Use the tabs below to jump into Projects, Finance, School, To-Do, or Goals.</div>`;
+  }
+
+  const CAL_DAY_START = 6, CAL_DAY_END = 23, CAL_PX_PER_HOUR = 56;
+
+  function renderDayStrip(selectedIso){
+    const selected = new Date(selectedIso + 'T00:00:00');
+    const days = [];
+    for(let i = -3; i <= 3; i++){
+      const d = new Date(selected);
+      d.setDate(d.getDate() + i);
+      days.push(d);
+    }
+    return `<div style="display:flex; gap:6px; margin-bottom:18px; overflow-x:auto; padding-bottom:2px;">
+      ${days.map(d => {
+        const iso = isoDate(d);
+        const isSel = iso === selectedIso;
+        return `<button data-select-day="${iso}" style="flex:0 0 auto; min-width:42px; padding:7px 4px; border-radius:12px; border:1px solid ${isSel ? 'var(--teal)' : 'var(--line)'}; background:${isSel ? 'var(--teal)' : 'var(--card)'}; color:${isSel ? '#fff' : 'var(--ink)'}; text-align:center;">
+          <div style="font-size:9px; text-transform:uppercase; opacity:.85; font-family:var(--font-mono);">${d.toLocaleDateString('en-US',{weekday:'short'})}</div>
+          <div style="font-weight:700; font-size:14px; margin-top:2px;">${d.getDate()}</div>
+        </button>`;
+      }).join('')}
+    </div>`;
+  }
+
+  function renderTimeline(blocks){
+    const totalHeight = (CAL_DAY_END - CAL_DAY_START) * CAL_PX_PER_HOUR;
+    const hourLines = [];
+    for(let h = CAL_DAY_START; h <= CAL_DAY_END; h++){
+      const top = (h - CAL_DAY_START) * CAL_PX_PER_HOUR;
+      const label = h === 0 ? '12 AM' : h < 12 ? h + ' AM' : h === 12 ? '12 PM' : (h - 12) + ' PM';
+      hourLines.push(`<div style="position:absolute; top:${top}px; left:44px; right:0; border-top:1px solid var(--line);"></div>`);
+      hourLines.push(`<div style="position:absolute; top:${top - 6}px; left:0; width:40px; font-family:var(--font-mono); font-size:9.5px; color:var(--ink-soft); text-align:right;">${label}</div>`);
+    }
+    const blockEls = blocks.map(b => {
+      const startMin = timeToMinutes(b.start) - CAL_DAY_START * 60;
+      const durMin = Math.max(20, timeToMinutes(b.end) - timeToMinutes(b.start));
+      const top = Math.max(0, startMin / 60 * CAL_PX_PER_HOUR);
+      const height = Math.max(26, durMin / 60 * CAL_PX_PER_HOUR - 2);
+      return `<button data-open-block="${b.id}" style="position:absolute; top:${top}px; left:48px; right:2px; height:${height}px; background:${b.color}26; border-left:4px solid ${b.color}; border-radius:8px; padding:5px 8px; text-align:left; overflow:hidden;">
+        <div style="display:flex; align-items:center; gap:5px; font-weight:600; font-size:12px; color:var(--ink);">
+          <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(b.title)}</span>
+          ${b.recurring ? '<span style="flex-shrink:0; width:11px; height:11px; color:var(--ink-soft);">' + icon('sync') + '</span>' : ''}
+        </div>
+        <div style="font-family:var(--font-mono); font-size:9.5px; color:var(--ink-soft);">${fmtTime(b.start)} – ${fmtTime(b.end)}</div>
+      </button>`;
+    }).join('');
+    return `<div style="position:relative; height:${totalHeight}px; margin-bottom:16px;">${hourLines.join('')}${blockEls}</div>`;
+  }
+
+  function renderCalendarTab(){
+    const selectedIso = state.calendarDate;
+    const blocks = blocksForDate(new Date(selectedIso + 'T00:00:00'));
+    const selectedDateObj = new Date(selectedIso + 'T00:00:00');
+    const addForm = state.addingCalendarBlock ? `
+      <div class="card">
+        <div class="k">New Block</div>
+        <input type="text" id="new-block-title" placeholder="Title (e.g. Scripture study)" class="money-input" style="margin-bottom:8px;" />
+        <div style="display:flex; gap:8px; margin-bottom:8px;">
+          <input type="time" id="new-block-start" value="09:00" class="money-input" />
+          <input type="time" id="new-block-end" value="10:00" class="money-input" />
+        </div>
+        <label style="display:flex; align-items:center; gap:8px; font-size:13px; color:var(--ink-soft); margin-bottom:12px;">
+          <input type="checkbox" id="new-block-recurring" checked style="width:16px; height:16px;" />
+          Repeat every day
+        </label>
+        <div class="sync-btn-row">
+          <button class="sync-btn" id="new-block-save">Add block</button>
+          <button class="sync-btn secondary" id="new-block-cancel">Cancel</button>
+        </div>
+      </div>` : `
+      <button class="card" id="add-block-btn" style="width:100%; text-align:center; color:var(--ink-soft); cursor:pointer;">
+        <div style="font-size:20px; font-family:var(--font-display); line-height:1;">+</div>
+        <div style="font-family:var(--font-display); font-weight:600; font-size:12.5px; margin-top:4px;">New block</div>
+      </button>`;
+    return `
+      <div class="section-title">Calendar</div>
+      <div class="section-sub">Plan your day block by block, like a missionary schedule.</div>
+      ${renderDayStrip(selectedIso)}
+      <div class="section-title" style="font-size:15px; margin-bottom:10px;">${selectedDateObj.toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric' })}</div>
+      ${renderTimeline(blocks)}
+      ${addForm}`;
+  }
+
+  function renderCalendarBlockDetail(b){
+    return `
+      <button class="back-link" id="back-btn">← Calendar</button>
+      <div class="hero-card" style="display:block;">
+        <div class="hlabel">${escapeHtml(b.title)}</div>
+        <div class="hsub">${fmtTime(b.start)} – ${fmtTime(b.end)}${b.recurring ? ' · Repeats every day' : ''}</div>
+      </div>
+      <div class="card">
+        <div class="k">Title</div>
+        <input type="text" id="edit-block-title" value="${escapeHtml(b.title)}" class="money-input" style="margin-bottom:12px;" />
+        <div class="k">Time</div>
+        <div style="display:flex; gap:8px; margin-bottom:12px;">
+          <input type="time" id="edit-block-start" value="${b.start}" class="money-input" />
+          <input type="time" id="edit-block-end" value="${b.end}" class="money-input" />
+        </div>
+        <label style="display:flex; align-items:center; gap:8px; font-size:13px; color:var(--ink-soft);">
+          <input type="checkbox" id="edit-block-recurring" ${b.recurring ? 'checked' : ''} style="width:16px; height:16px;" />
+          Repeat every day
+        </label>
+      </div>
+      <div class="danger-zone">
+        <button class="sync-btn danger" id="delete-block-btn">${state.calendarBlockDeleteArmed ? 'Tap again to permanently delete' : 'Delete block'}</button>
+      </div>`;
   }
 
   function renderPlaceholderTab(title, subtitle){
@@ -1158,8 +1315,13 @@
       else bodyHtml = renderSavingsGoalDetail(g);
     } else if(state.view === 'financeCategory'){
       bodyHtml = renderFinanceCategoryDetail(state.financeCategory);
+    } else if(state.view === 'calendarBlock'){
+      const b = state.calendarBlocks.find(x => x.id === state.activeCalendarBlock);
+      if(!b){ state.view = 'tab'; state.tab = 'calendar'; bodyHtml = renderCalendarTab(); }
+      else bodyHtml = renderCalendarBlockDetail(b);
     } else {
-      if(state.tab === 'projects') bodyHtml = renderProjectsTab();
+      if(state.tab === 'calendar') bodyHtml = renderCalendarTab();
+      else if(state.tab === 'projects') bodyHtml = renderProjectsTab();
       else if(state.tab === 'finance') bodyHtml = renderFinanceTab();
       else if(state.tab === 'school') bodyHtml = renderPlaceholderTab('School', 'Classes, assignments, and deadlines.');
       else if(state.tab === 'todo') bodyHtml = renderPlaceholderTab('To-Do List', 'Daily tasks and reminders.');
@@ -1203,6 +1365,9 @@
         state.savingsDeleteArmed = false;
         state.addingSavingsGoal = false;
         state.financeCategory = null;
+        state.activeCalendarBlock = null;
+        state.addingCalendarBlock = false;
+        state.calendarBlockDeleteArmed = false;
         render(); window.scrollTo(0,0);
       });
     });
@@ -1221,6 +1386,10 @@
         state.financeCategory = null;
         state.addingBudget = false;
         state.addingSavingsGoal = false;
+      } else if(state.view === 'calendarBlock'){
+        state.view = 'tab';
+        state.activeCalendarBlock = null;
+        state.calendarBlockDeleteArmed = false;
       } else {
         state.view = 'tab';
         state.activeProject = null;
@@ -1261,6 +1430,7 @@
         state.budgets = state.importPending.budgets;
         state.savingsGoals = state.importPending.savingsGoals;
         state.earnings = state.importPending.earnings;
+        state.calendarBlocks = state.importPending.calendarBlocks;
         state.importPending = null;
         state.importStatus = 'ok:Import complete.';
         save();
@@ -1489,6 +1659,81 @@
       return;
     }
 
+    if(state.view === 'tab' && state.tab === 'calendar'){
+      root.querySelectorAll('[data-select-day]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          state.calendarDate = btn.getAttribute('data-select-day');
+          render();
+        });
+      });
+      root.querySelectorAll('[data-open-block]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          state.activeCalendarBlock = btn.getAttribute('data-open-block');
+          state.view = 'calendarBlock';
+          state.calendarBlockDeleteArmed = false;
+          render(); window.scrollTo(0,0);
+        });
+      });
+      if(state.addingCalendarBlock){
+        const titleInput = root.querySelector('#new-block-title');
+        const startInput = root.querySelector('#new-block-start');
+        const endInput = root.querySelector('#new-block-end');
+        const recurringInput = root.querySelector('#new-block-recurring');
+        const saveBtn = root.querySelector('#new-block-save');
+        const cancelBtn = root.querySelector('#new-block-cancel');
+        if(titleInput) titleInput.focus();
+        const doSave = () => {
+          const title = titleInput.value.trim();
+          if(!title || !startInput.value || !endInput.value) return;
+          addCalendarBlock(title, startInput.value, endInput.value, recurringInput.checked);
+        };
+        saveBtn.addEventListener('click', doSave);
+        cancelBtn.addEventListener('click', () => { state.addingCalendarBlock = false; render(); });
+      } else {
+        const addBlockBtn = root.querySelector('#add-block-btn');
+        if(addBlockBtn) addBlockBtn.addEventListener('click', () => { state.addingCalendarBlock = true; render(); });
+      }
+      return;
+    }
+
+    if(state.view === 'calendarBlock'){
+      const b = state.calendarBlocks.find(x => x.id === state.activeCalendarBlock);
+      if(!b) return;
+
+      const saveEdits = () => {
+        const title = root.querySelector('#edit-block-title').value.trim();
+        const start = root.querySelector('#edit-block-start').value;
+        const end = root.querySelector('#edit-block-end').value;
+        const recurring = root.querySelector('#edit-block-recurring').checked;
+        if(title) b.title = title;
+        if(start) b.start = start;
+        if(end) b.end = end;
+        b.recurring = recurring;
+        if(recurring) b.date = null;
+        else if(!b.date) b.date = state.calendarDate;
+        save();
+      };
+      root.querySelector('#edit-block-title').addEventListener('blur', saveEdits);
+      root.querySelector('#edit-block-start').addEventListener('change', saveEdits);
+      root.querySelector('#edit-block-end').addEventListener('change', saveEdits);
+      root.querySelector('#edit-block-recurring').addEventListener('change', saveEdits);
+
+      root.querySelector('#delete-block-btn').addEventListener('click', () => {
+        if(!state.calendarBlockDeleteArmed){
+          state.calendarBlockDeleteArmed = true;
+          render();
+          return;
+        }
+        state.calendarBlocks = state.calendarBlocks.filter(x => x.id !== b.id);
+        state.view = 'tab';
+        state.tab = 'calendar';
+        state.activeCalendarBlock = null;
+        state.calendarBlockDeleteArmed = false;
+        save();
+      });
+      return;
+    }
+
     if(state.view === 'project'){
       const p = state.projects.find(x => x.id === state.activeProject);
       if(!p) return;
@@ -1571,8 +1816,16 @@
     save();
   }
 
+  function addCalendarBlock(title, start, end, recurring){
+    const color = COLORS[state.calendarBlocks.length % COLORS.length];
+    const newB = { id: makeId(), title: title.trim(), start, end, recurring, date: recurring ? null : state.calendarDate, color };
+    state.calendarBlocks.push(newB);
+    state.addingCalendarBlock = false;
+    save();
+  }
+
   function exportData(){
-    const payload = { app: 'project-hub', version: 1, exportedAt: new Date().toISOString(), projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings };
+    const payload = { app: 'project-hub', version: 1, exportedAt: new Date().toISOString(), projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings, calendarBlocks: state.calendarBlocks };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -1595,7 +1848,8 @@
           projects: normalizeProjects(incomingProjects),
           budgets: normalizeBudgets(parsed && parsed.budgets),
           savingsGoals: normalizeSavingsGoals(parsed && parsed.savingsGoals),
-          earnings: normalizeEarnings(parsed && parsed.earnings)
+          earnings: normalizeEarnings(parsed && parsed.earnings),
+          calendarBlocks: normalizeCalendarBlocks(parsed && parsed.calendarBlocks)
         };
         state.importStatus = '';
         render();
