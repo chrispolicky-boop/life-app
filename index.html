@@ -483,18 +483,32 @@
     return buckets;
   }
 
+  const CALENDAR_BLOCK_TYPES = [
+    { key: 'meeting', label: 'Meeting', color: '#F2C94C' },
+    { key: 'work', label: 'Work', color: '#A855F7' },
+    { key: 'exam', label: 'Exam', color: '#EF4444' },
+    { key: 'study', label: 'Study time', color: '#3B82F6' },
+    { key: 'fun', label: 'Fun time', color: '#57B978' },
+    { key: 'other', label: 'Other', color: '#ECEFE9' }
+  ];
+  function typeColor(key){
+    const t = CALENDAR_BLOCK_TYPES.find(x => x.key === key);
+    return t ? t.color : CALENDAR_BLOCK_TYPES[CALENDAR_BLOCK_TYPES.length - 1].color;
+  }
+
   const SEED_CALENDAR_BLOCKS = [
-    { title: 'Morning routine', start: '06:30', end: '07:30', recurring: true, color: '#3EBBA9' },
-    { title: 'Internship', start: '08:00', end: '17:00', recurring: true, color: '#7C81F5' },
-    { title: 'Workout', start: '17:30', end: '18:30', recurring: true, color: '#F2836E' },
-    { title: 'Dinner', start: '19:00', end: '19:30', recurring: true, color: '#E8B23D' },
-    { title: 'Project time', start: '20:00', end: '21:30', recurring: true, color: '#EA7EB0' }
+    { title: 'Morning routine', start: '06:30', end: '07:30', recurring: true, type: 'other' },
+    { title: 'Internship', start: '08:00', end: '17:00', recurring: true, type: 'work' },
+    { title: 'Workout', start: '17:30', end: '18:30', recurring: true, type: 'fun' },
+    { title: 'Dinner', start: '19:00', end: '19:30', recurring: true, type: 'other' },
+    { title: 'Project time', start: '20:00', end: '21:30', recurring: true, type: 'study' }
   ];
   function defaultCalendarBlocks(){
-    return SEED_CALENDAR_BLOCKS.map(b => ({ id: makeId(), title: b.title, start: b.start, end: b.end, recurring: b.recurring, date: null, color: b.color }));
+    return SEED_CALENDAR_BLOCKS.map(b => ({ id: makeId(), title: b.title, start: b.start, end: b.end, recurring: b.recurring, date: null, type: b.type }));
   }
   function normalizeCalendarBlock(b){
     b = b || {};
+    const validType = CALENDAR_BLOCK_TYPES.some(t => t.key === b.type) ? b.type : 'other';
     return {
       id: b.id || makeId(),
       title: b.title || 'Untitled',
@@ -502,12 +516,17 @@
       end: /^\d{2}:\d{2}$/.test(b.end) ? b.end : '10:00',
       recurring: !!b.recurring,
       date: b.recurring ? null : (b.date || null),
-      color: b.color || COLORS[0]
+      type: validType
     };
   }
   function normalizeCalendarBlocks(list){ return asArray(list).map(normalizeCalendarBlock); }
   function isoDate(d){ return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
   function timeToMinutes(t){ const [h,m] = t.split(':').map(Number); return h*60+m; }
+  function minutesToTime(mins){
+    mins = Math.max(0, Math.min(23*60+59, Math.round(mins)));
+    const h = Math.floor(mins/60), m = mins%60;
+    return String(h).padStart(2,'0') + ':' + String(m).padStart(2,'0');
+  }
   function fmtTime(t){
     const mins = timeToMinutes(t);
     const h = Math.floor(mins/60), m = mins%60;
@@ -548,6 +567,9 @@
     earnings: [],
     calendarBlocks: [],
     calendarDate: isoDate(new Date()),
+    calendarMonthView: false,
+    calendarMonthCursor: isoDate(new Date()),
+    newBlockType: 'meeting',
     activeCalendarBlock: null,
     addingCalendarBlock: false,
     calendarBlockDeleteArmed: false,
@@ -839,11 +861,12 @@
       hourLines.push(`<div style="position:absolute; top:${top - 6}px; left:0; width:40px; font-family:var(--font-mono); font-size:9.5px; color:var(--ink-soft); text-align:right;">${label}</div>`);
     }
     const blockEls = blocks.map(b => {
+      const color = typeColor(b.type);
       const startMin = timeToMinutes(b.start) - CAL_DAY_START * 60;
       const durMin = Math.max(20, timeToMinutes(b.end) - timeToMinutes(b.start));
       const top = Math.max(0, startMin / 60 * CAL_PX_PER_HOUR);
       const height = Math.max(26, durMin / 60 * CAL_PX_PER_HOUR - 2);
-      return `<button data-open-block="${b.id}" style="position:absolute; top:${top}px; left:48px; right:2px; height:${height}px; background:${b.color}26; border-left:4px solid ${b.color}; border-radius:8px; padding:5px 8px; text-align:left; overflow:hidden;">
+      return `<button data-open-block="${b.id}" style="position:absolute; top:${top}px; left:48px; right:2px; height:${height}px; background:${color}26; border-left:4px solid ${color}; border-radius:8px; padding:5px 8px; text-align:left; overflow:hidden; touch-action:none;">
         <div style="display:flex; align-items:center; gap:5px; font-weight:600; font-size:12px; color:var(--ink);">
           <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(b.title)}</span>
           ${b.recurring ? '<span style="flex-shrink:0; width:11px; height:11px; color:var(--ink-soft);">' + icon('sync') + '</span>' : ''}
@@ -854,7 +877,64 @@
     return `<div style="position:relative; height:${totalHeight}px; margin-bottom:16px;">${hourLines.join('')}${blockEls}</div>`;
   }
 
+  function renderTypePicker(group, selectedKey){
+    return `<div style="display:grid; grid-template-columns:repeat(3,1fr); gap:8px;">
+      ${CALENDAR_BLOCK_TYPES.map(t => {
+        const sel = t.key === selectedKey;
+        return `<button type="button" data-type-pick="${t.key}" data-type-group="${group}" style="display:flex; align-items:center; gap:6px; padding:9px 8px; border-radius:10px; border:1.5px solid ${sel ? t.color : 'var(--line)'}; background:${sel ? t.color + '26' : 'var(--card)'}; color:var(--ink); font-size:11.5px; font-weight:600; font-family:var(--font-body);">
+          <span style="width:10px; height:10px; border-radius:50%; background:${t.color}; flex-shrink:0;"></span>
+          ${t.label}
+        </button>`;
+      }).join('')}
+    </div>`;
+  }
+
+  function renderMonthGrid(cursorIso){
+    const cursor = new Date(cursorIso + 'T00:00:00');
+    const year = cursor.getFullYear(), month = cursor.getMonth();
+    const firstOfMonth = new Date(year, month, 1);
+    const startWeekday = firstOfMonth.getDay();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const monthLabel = firstOfMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    const todayIso = isoDate(new Date());
+    const selectedIso = state.calendarDate;
+
+    const cells = [];
+    for(let i = 0; i < startWeekday; i++) cells.push('<div></div>');
+    for(let d = 1; d <= daysInMonth; d++){
+      const iso = isoDate(new Date(year, month, d));
+      const hasEvents = state.calendarBlocks.some(b => !b.recurring && b.date === iso);
+      const isToday = iso === todayIso;
+      const isSel = iso === selectedIso;
+      cells.push(`<button data-month-day="${iso}" style="aspect-ratio:1; border-radius:10px; border:1px solid ${isSel ? 'var(--teal)' : 'var(--line)'}; background:${isSel ? 'var(--teal)' : 'var(--card)'}; color:${isSel ? '#fff' : 'var(--ink)'}; font-family:var(--font-mono); font-size:12.5px; font-weight:${isToday ? '700' : '500'}; position:relative;">
+        ${d}
+        ${hasEvents ? `<span style="position:absolute; bottom:4px; left:50%; transform:translateX(-50%); width:4px; height:4px; border-radius:50%; background:${isSel ? '#fff' : 'var(--teal)'};"></span>` : ''}
+      </button>`);
+    }
+
+    return `
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
+        <button data-month-prev style="background:none; border:none; color:var(--ink-soft); font-size:20px; padding:4px 10px;">‹</button>
+        <div style="font-family:var(--font-display); font-weight:600; font-size:15px;">${monthLabel}</div>
+        <button data-month-next style="background:none; border:none; color:var(--ink-soft); font-size:20px; padding:4px 10px;">›</button>
+      </div>
+      <div style="display:grid; grid-template-columns:repeat(7,1fr); gap:6px; margin-bottom:6px;">
+        ${['S','M','T','W','T','F','S'].map(d => `<div style="text-align:center; font-family:var(--font-mono); font-size:9.5px; color:var(--ink-soft);">${d}</div>`).join('')}
+      </div>
+      <div style="display:grid; grid-template-columns:repeat(7,1fr); gap:6px; margin-bottom:18px;">
+        ${cells.join('')}
+      </div>`;
+  }
+
   function renderCalendarTab(){
+    if(state.calendarMonthView){
+      return `
+        <div class="section-title" style="display:flex; align-items:center; justify-content:space-between;">
+          <span>Calendar</span>
+          <button id="cal-day-view-btn" class="ghost-btn">Day view</button>
+        </div>
+        ${renderMonthGrid(state.calendarMonthCursor)}`;
+    }
     const selectedIso = state.calendarDate;
     const blocks = blocksForDate(new Date(selectedIso + 'T00:00:00'));
     const selectedDateObj = new Date(selectedIso + 'T00:00:00');
@@ -866,10 +946,12 @@
           <input type="time" id="new-block-start" value="09:00" class="money-input" />
           <input type="time" id="new-block-end" value="10:00" class="money-input" />
         </div>
-        <label style="display:flex; align-items:center; gap:8px; font-size:13px; color:var(--ink-soft); margin-bottom:12px;">
-          <input type="checkbox" id="new-block-recurring" checked style="width:16px; height:16px;" />
+        <label style="display:flex; align-items:center; gap:8px; font-size:13px; color:var(--ink-soft); margin-bottom:14px;">
+          <input type="checkbox" id="new-block-recurring" style="width:16px; height:16px;" />
           Repeat every day
         </label>
+        <div class="k">Type</div>
+        <div style="margin-bottom:14px;">${renderTypePicker('new', state.newBlockType)}</div>
         <div class="sync-btn-row">
           <button class="sync-btn" id="new-block-save">Add block</button>
           <button class="sync-btn secondary" id="new-block-cancel">Cancel</button>
@@ -880,7 +962,10 @@
         <div style="font-family:var(--font-display); font-weight:600; font-size:12.5px; margin-top:4px;">New block</div>
       </button>`;
     return `
-      <div class="section-title">Calendar</div>
+      <div class="section-title" style="display:flex; align-items:center; justify-content:space-between;">
+        <span>Calendar</span>
+        <button id="cal-month-view-btn" class="ghost-btn">Month view</button>
+      </div>
       ${renderDayStrip(selectedIso)}
       <div class="section-title" style="font-size:15px; margin-bottom:10px;">${selectedDateObj.toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric' })}</div>
       ${renderTimeline(blocks)}
@@ -888,9 +973,10 @@
   }
 
   function renderCalendarBlockDetail(b){
+    const color = typeColor(b.type);
     return `
       <button class="back-link" id="back-btn">← Calendar</button>
-      <div class="hero-card" style="display:block;">
+      <div class="hero-card" style="display:block; border-left:4px solid ${color};">
         <div class="hlabel">${escapeHtml(b.title)}</div>
         <div class="hsub">${fmtTime(b.start)} – ${fmtTime(b.end)}${b.recurring ? ' · Repeats every day' : ''}</div>
       </div>
@@ -902,10 +988,12 @@
           <input type="time" id="edit-block-start" value="${b.start}" class="money-input" />
           <input type="time" id="edit-block-end" value="${b.end}" class="money-input" />
         </div>
-        <label style="display:flex; align-items:center; gap:8px; font-size:13px; color:var(--ink-soft);">
+        <label style="display:flex; align-items:center; gap:8px; font-size:13px; color:var(--ink-soft); margin-bottom:16px;">
           <input type="checkbox" id="edit-block-recurring" ${b.recurring ? 'checked' : ''} style="width:16px; height:16px;" />
           Repeat every day
         </label>
+        <div class="k">Type</div>
+        ${renderTypePicker('edit', b.type)}
       </div>
       <div class="danger-zone">
         <button class="sync-btn danger" id="delete-block-btn">${state.calendarBlockDeleteArmed ? 'Tap again to permanently delete' : 'Delete block'}</button>
@@ -1388,6 +1476,7 @@
         state.activeCalendarBlock = null;
         state.addingCalendarBlock = false;
         state.calendarBlockDeleteArmed = false;
+        state.calendarMonthView = false;
         render(); window.scrollTo(0,0);
       });
     });
@@ -1691,20 +1780,93 @@
     }
 
     if(state.view === 'tab' && state.tab === 'calendar'){
+      const monthViewBtn = root.querySelector('#cal-month-view-btn');
+      if(monthViewBtn) monthViewBtn.addEventListener('click', () => {
+        state.calendarMonthView = true;
+        state.calendarMonthCursor = state.calendarDate;
+        render(); window.scrollTo(0,0);
+      });
+      const dayViewBtn = root.querySelector('#cal-day-view-btn');
+      if(dayViewBtn) dayViewBtn.addEventListener('click', () => {
+        state.calendarMonthView = false;
+        render(); window.scrollTo(0,0);
+      });
+      root.querySelectorAll('[data-month-day]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          state.calendarDate = btn.getAttribute('data-month-day');
+          state.calendarMonthView = false;
+          render(); window.scrollTo(0,0);
+        });
+      });
+      const monthPrevBtn = root.querySelector('[data-month-prev]');
+      if(monthPrevBtn) monthPrevBtn.addEventListener('click', () => {
+        const d = new Date(state.calendarMonthCursor + 'T00:00:00');
+        state.calendarMonthCursor = isoDate(new Date(d.getFullYear(), d.getMonth() - 1, 1));
+        render();
+      });
+      const monthNextBtn = root.querySelector('[data-month-next]');
+      if(monthNextBtn) monthNextBtn.addEventListener('click', () => {
+        const d = new Date(state.calendarMonthCursor + 'T00:00:00');
+        state.calendarMonthCursor = isoDate(new Date(d.getFullYear(), d.getMonth() + 1, 1));
+        render();
+      });
+
       root.querySelectorAll('[data-select-day]').forEach(btn => {
         btn.addEventListener('click', () => {
           state.calendarDate = btn.getAttribute('data-select-day');
           render();
         });
       });
-      root.querySelectorAll('[data-open-block]').forEach(btn => {
-        btn.addEventListener('click', () => {
-          state.activeCalendarBlock = btn.getAttribute('data-open-block');
+
+      const totalTimelineHeight = (CAL_DAY_END - CAL_DAY_START) * CAL_PX_PER_HOUR;
+      root.querySelectorAll('[data-open-block]').forEach(el => {
+        const blockId = el.getAttribute('data-open-block');
+        const b = state.calendarBlocks.find(x => x.id === blockId);
+        if(!b) return;
+        let dragging = false, moved = false, startY = 0, startTop = 0, durMin = 0, maxTop = 0;
+        el.addEventListener('pointerdown', e => {
+          dragging = true; moved = false;
+          startY = e.clientY;
+          startTop = parseFloat(el.style.top) || 0;
+          durMin = timeToMinutes(b.end) - timeToMinutes(b.start);
+          maxTop = totalTimelineHeight - el.offsetHeight;
+          el.setPointerCapture(e.pointerId);
+        });
+        el.addEventListener('pointermove', e => {
+          if(!dragging) return;
+          const dy = e.clientY - startY;
+          if(Math.abs(dy) > 5) moved = true;
+          if(!moved) return;
+          const newTop = Math.min(Math.max(0, startTop + dy), maxTop);
+          el.style.top = newTop + 'px';
+          el.style.boxShadow = '0 8px 20px rgba(0,0,0,0.45)';
+          el.style.zIndex = '5';
+        });
+        const finishDrag = () => {
+          if(!dragging) return;
+          dragging = false;
+          if(!moved) return;
+          const finalTop = parseFloat(el.style.top) || 0;
+          const rawStartMin = CAL_DAY_START * 60 + (finalTop / CAL_PX_PER_HOUR) * 60;
+          let newStartMin = Math.round(rawStartMin / 5) * 5;
+          newStartMin = Math.max(CAL_DAY_START * 60, Math.min(newStartMin, CAL_DAY_END * 60 - durMin));
+          const newEndMin = newStartMin + durMin;
+          b.start = minutesToTime(newStartMin);
+          b.end = minutesToTime(newEndMin);
+          if(!b.recurring && !b.date) b.date = state.calendarDate;
+          save();
+        };
+        el.addEventListener('pointerup', finishDrag);
+        el.addEventListener('pointercancel', finishDrag);
+        el.addEventListener('click', e => {
+          if(moved){ moved = false; e.preventDefault(); e.stopPropagation(); return; }
+          state.activeCalendarBlock = blockId;
           state.view = 'calendarBlock';
           state.calendarBlockDeleteArmed = false;
           render(); window.scrollTo(0,0);
         });
       });
+
       if(state.addingCalendarBlock){
         const titleInput = root.querySelector('#new-block-title');
         const startInput = root.querySelector('#new-block-start');
@@ -1713,13 +1875,26 @@
         const saveBtn = root.querySelector('#new-block-save');
         const cancelBtn = root.querySelector('#new-block-cancel');
         if(titleInput) titleInput.focus();
+        const typeButtons = root.querySelectorAll('[data-type-pick][data-type-group="new"]');
+        typeButtons.forEach(tBtn => {
+          tBtn.addEventListener('click', () => {
+            state.newBlockType = tBtn.getAttribute('data-type-pick');
+            typeButtons.forEach(other => {
+              const key = other.getAttribute('data-type-pick');
+              const color = typeColor(key);
+              const sel = key === state.newBlockType;
+              other.style.borderColor = sel ? color : 'var(--line)';
+              other.style.background = sel ? color + '26' : 'var(--card)';
+            });
+          });
+        });
         const doSave = () => {
           const title = titleInput.value.trim();
           if(!title || !startInput.value || !endInput.value) return;
-          addCalendarBlock(title, startInput.value, endInput.value, recurringInput.checked);
+          addCalendarBlock(title, startInput.value, endInput.value, recurringInput.checked, state.newBlockType);
         };
         saveBtn.addEventListener('click', doSave);
-        cancelBtn.addEventListener('click', () => { state.addingCalendarBlock = false; render(); });
+        cancelBtn.addEventListener('click', () => { state.addingCalendarBlock = false; state.newBlockType = 'meeting'; render(); });
       } else {
         const addBlockBtn = root.querySelector('#add-block-btn');
         if(addBlockBtn) addBlockBtn.addEventListener('click', () => { state.addingCalendarBlock = true; render(); });
@@ -1748,6 +1923,13 @@
       root.querySelector('#edit-block-start').addEventListener('change', saveEdits);
       root.querySelector('#edit-block-end').addEventListener('change', saveEdits);
       root.querySelector('#edit-block-recurring').addEventListener('change', saveEdits);
+
+      root.querySelectorAll('[data-type-pick][data-type-group="edit"]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          b.type = btn.getAttribute('data-type-pick');
+          save();
+        });
+      });
 
       root.querySelector('#delete-block-btn').addEventListener('click', () => {
         if(!state.calendarBlockDeleteArmed){
@@ -1847,11 +2029,12 @@
     save();
   }
 
-  function addCalendarBlock(title, start, end, recurring){
-    const color = COLORS[state.calendarBlocks.length % COLORS.length];
-    const newB = { id: makeId(), title: title.trim(), start, end, recurring, date: recurring ? null : state.calendarDate, color };
+  function addCalendarBlock(title, start, end, recurring, type){
+    const validType = CALENDAR_BLOCK_TYPES.some(t => t.key === type) ? type : 'other';
+    const newB = { id: makeId(), title: title.trim(), start, end, recurring, date: recurring ? null : state.calendarDate, type: validType };
     state.calendarBlocks.push(newB);
     state.addingCalendarBlock = false;
+    state.newBlockType = 'meeting';
     save();
   }
 
