@@ -866,7 +866,7 @@
       const durMin = Math.max(20, timeToMinutes(b.end) - timeToMinutes(b.start));
       const top = Math.max(0, startMin / 60 * CAL_PX_PER_HOUR);
       const height = Math.max(26, durMin / 60 * CAL_PX_PER_HOUR - 2);
-      return `<button data-open-block="${b.id}" style="position:absolute; top:${top}px; left:48px; right:2px; height:${height}px; background:${color}26; border-left:4px solid ${color}; border-radius:8px; padding:5px 8px; text-align:left; overflow:hidden; touch-action:none;">
+      return `<button data-open-block="${b.id}" style="position:absolute; top:${top}px; left:48px; right:2px; height:${height}px; background:${color}26; border-left:4px solid ${color}; border-radius:8px; padding:5px 8px; text-align:left; overflow:hidden;">
         <div style="display:flex; align-items:center; gap:5px; font-weight:600; font-size:12px; color:var(--ink);">
           <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(b.title)}</span>
           ${b.recurring ? '<span style="flex-shrink:0; width:11px; height:11px; color:var(--ink-soft);">' + icon('sync') + '</span>' : ''}
@@ -1819,47 +1819,60 @@
       });
 
       const totalTimelineHeight = (CAL_DAY_END - CAL_DAY_START) * CAL_PX_PER_HOUR;
+      const HOLD_MS = 500, MOVE_CANCEL_PX = 10, DRAG_START_PX = 4;
       root.querySelectorAll('[data-open-block]').forEach(el => {
         const blockId = el.getAttribute('data-open-block');
         const b = state.calendarBlocks.find(x => x.id === blockId);
         if(!b) return;
-        let dragging = false, moved = false, startY = 0, startTop = 0, durMin = 0, maxTop = 0;
+        let holdTimer = null, armed = false, moved = false, cancelled = false;
+        let startY = 0, startTop = 0, durMin = 0, maxTop = 0;
+        const clearHold = () => { if(holdTimer){ clearTimeout(holdTimer); holdTimer = null; } };
         el.addEventListener('pointerdown', e => {
-          dragging = true; moved = false;
+          armed = false; moved = false; cancelled = false;
           startY = e.clientY;
           startTop = parseFloat(el.style.top) || 0;
           durMin = timeToMinutes(b.end) - timeToMinutes(b.start);
           maxTop = totalTimelineHeight - el.offsetHeight;
-          el.setPointerCapture(e.pointerId);
+          try{ el.setPointerCapture(e.pointerId); }catch(err){}
+          clearHold();
+          holdTimer = setTimeout(() => {
+            armed = true;
+            el.style.touchAction = 'none';
+            el.style.boxShadow = '0 8px 20px rgba(0,0,0,0.45)';
+            el.style.zIndex = '5';
+            el.style.transform = 'scale(1.02)';
+          }, HOLD_MS);
         });
         el.addEventListener('pointermove', e => {
-          if(!dragging) return;
           const dy = e.clientY - startY;
-          if(Math.abs(dy) > 5) moved = true;
+          if(!armed){
+            if(Math.abs(dy) > MOVE_CANCEL_PX){ cancelled = true; clearHold(); }
+            return;
+          }
+          if(Math.abs(dy) > DRAG_START_PX) moved = true;
           if(!moved) return;
           const newTop = Math.min(Math.max(0, startTop + dy), maxTop);
           el.style.top = newTop + 'px';
-          el.style.boxShadow = '0 8px 20px rgba(0,0,0,0.45)';
-          el.style.zIndex = '5';
         });
         const finishDrag = () => {
-          if(!dragging) return;
-          dragging = false;
-          if(!moved) return;
-          const finalTop = parseFloat(el.style.top) || 0;
-          const rawStartMin = CAL_DAY_START * 60 + (finalTop / CAL_PX_PER_HOUR) * 60;
-          let newStartMin = Math.round(rawStartMin / 5) * 5;
-          newStartMin = Math.max(CAL_DAY_START * 60, Math.min(newStartMin, CAL_DAY_END * 60 - durMin));
-          const newEndMin = newStartMin + durMin;
-          b.start = minutesToTime(newStartMin);
-          b.end = minutesToTime(newEndMin);
-          if(!b.recurring && !b.date) b.date = state.calendarDate;
-          save();
+          clearHold();
+          if(armed && moved){
+            const finalTop = parseFloat(el.style.top) || 0;
+            const rawStartMin = CAL_DAY_START * 60 + (finalTop / CAL_PX_PER_HOUR) * 60;
+            let newStartMin = Math.round(rawStartMin / 5) * 5;
+            newStartMin = Math.max(CAL_DAY_START * 60, Math.min(newStartMin, CAL_DAY_END * 60 - durMin));
+            const newEndMin = newStartMin + durMin;
+            b.start = minutesToTime(newStartMin);
+            b.end = minutesToTime(newEndMin);
+            if(!b.recurring && !b.date) b.date = state.calendarDate;
+            save();
+          }
+          armed = false;
         };
         el.addEventListener('pointerup', finishDrag);
-        el.addEventListener('pointercancel', finishDrag);
+        el.addEventListener('pointercancel', () => { clearHold(); armed = false; });
         el.addEventListener('click', e => {
-          if(moved){ moved = false; e.preventDefault(); e.stopPropagation(); return; }
+          if(cancelled || moved){ cancelled = false; moved = false; e.preventDefault(); e.stopPropagation(); return; }
           state.activeCalendarBlock = blockId;
           state.view = 'calendarBlock';
           state.calendarBlockDeleteArmed = false;
