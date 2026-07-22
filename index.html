@@ -608,8 +608,89 @@
     appId: "1:33381407955:web:f17c861698735bc1914826"
   };
   const SYNC_PATH = 'projecthub';
+  const PUSH_PATH = 'projecthubPush';
   const OWNER_LOGIN_EMAIL = 'chrispolicky@project-hub.app';
+  const VAPID_PUBLIC_KEY = 'BBp7BYBbDyD85Ia9XO8Xx8kg-Q1DACElPI9juqj0R6_VufS-0lTKssvj3sgsHN0Uwddznnd_VguZIZP-Q8WP_SA';
   let fbDb = null;
+
+  function urlBase64ToUint8Array(base64String){
+    const padding = '='.repeat((4 - base64String.length % 4) % 4);
+    const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+    const raw = atob(base64);
+    const arr = new Uint8Array(raw.length);
+    for(let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+    return arr;
+  }
+
+  function getPushDeviceId(){
+    let id = localStorage.getItem('project-hub-push-device-id');
+    if(!id){
+      id = makeId();
+      localStorage.setItem('project-hub-push-device-id', id);
+    }
+    return id;
+  }
+
+  async function refreshPushStatus(){
+    if(!('serviceWorker' in navigator) || !('PushManager' in window)){
+      state.pushSupported = false;
+      render();
+      return;
+    }
+    state.pushSupported = true;
+    try{
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      state.pushSubscribed = !!sub;
+    }catch(e){ state.pushSubscribed = false; }
+    render();
+  }
+
+  async function enablePushNotifications(){
+    if(!('serviceWorker' in navigator) || !('PushManager' in window)){
+      state.pushError = 'This device/browser can\'t receive notifications. On iPhone, add this app to your Home Screen first, then open it from there.';
+      render();
+      return;
+    }
+    state.pushError = '';
+    try{
+      const permission = await Notification.requestPermission();
+      if(permission !== 'granted'){
+        state.pushError = 'Notifications permission was not granted.';
+        render();
+        return;
+      }
+      const reg = await navigator.serviceWorker.ready;
+      let sub = await reg.pushManager.getSubscription();
+      if(!sub){
+        sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
+        });
+      }
+      if(fbDb && state.user){
+        await fbDb.ref(PUSH_PATH + '/' + getPushDeviceId()).set(sub.toJSON());
+      }
+      state.pushSubscribed = true;
+      render();
+    }catch(e){
+      state.pushError = 'Could not enable notifications on this device.';
+      render();
+    }
+  }
+
+  async function disablePushNotifications(){
+    try{
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      if(sub) await sub.unsubscribe();
+      if(fbDb && state.user){
+        await fbDb.ref(PUSH_PATH + '/' + getPushDeviceId()).remove();
+      }
+    }catch(e){}
+    state.pushSubscribed = false;
+    render();
+  }
 
   let state = {
     tab: 'home',
@@ -632,6 +713,9 @@
     loaded: false,
     user: null,
     passcodeError: '',
+    pushSupported: null,
+    pushSubscribed: false,
+    pushError: '',
     addingProject: false,
     deleteArmed: false,
     addingBudget: false,
@@ -763,6 +847,7 @@
     state.loaded = true;
     render();
     initFirebase();
+    refreshPushStatus();
   }
   function save(rerender){
     try{ localStorage.setItem(STORAGE_KEY, JSON.stringify({ projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings, calendarBlocks: state.calendarBlocks, todoTasks: state.todoTasks })); }catch(e){}
@@ -858,6 +943,21 @@
           <button id="passcode-btn" style="--cat-color:#3EBBA9">Unlock</button>
         </div>
         ${state.passcodeError ? `<div class="sync-sub" style="color:var(--pink); margin-top:6px;">${escapeHtml(state.passcodeError)}</div>` : ''}
+        `}
+      </div>
+
+      <div class="sync-page-card">
+        <div class="sync-status-text" style="margin-bottom:4px;">Notifications</div>
+        ${!state.user ? `
+        <div class="sync-sub">Unlock sync above first — notifications are tied to your account.</div>` : state.pushSupported === false ? `
+        <div class="sync-sub">This browser can't receive notifications. On iPhone: add Project Hub to your Home Screen (Share → Add to Home Screen), then open it from there and try again.</div>` : `
+        <div class="sync-sub">${state.pushSubscribed ? 'On for this device — a daily to-do reminder and a Sunday weekly look-ahead.' : 'Get a daily to-do reminder and a Sunday look-ahead at what\'s coming up this week.'}</div>
+        <div class="sync-btn-row">
+          ${state.pushSubscribed
+            ? `<button class="sync-btn secondary" id="push-disable-btn">Turn off</button>`
+            : `<button class="sync-btn" id="push-enable-btn">Enable notifications</button>`}
+        </div>
+        ${state.pushError ? `<div class="sync-sub" style="color:var(--pink); margin-top:10px;">${escapeHtml(state.pushError)}</div>` : ''}
         `}
       </div>
 
@@ -1705,6 +1805,10 @@
       if(syncNowBtn) syncNowBtn.addEventListener('click', () => { pushToCloud(); render(); });
       const signOutBtn = root.querySelector('#sign-out-btn');
       if(signOutBtn) signOutBtn.addEventListener('click', signOutOfSync);
+      const pushEnableBtn = root.querySelector('#push-enable-btn');
+      if(pushEnableBtn) pushEnableBtn.addEventListener('click', enablePushNotifications);
+      const pushDisableBtn = root.querySelector('#push-disable-btn');
+      if(pushDisableBtn) pushDisableBtn.addEventListener('click', disablePushNotifications);
       const passcodeBtn = root.querySelector('#passcode-btn');
       const passcodeInput = root.querySelector('#passcode-input');
       if(passcodeBtn && passcodeInput){
