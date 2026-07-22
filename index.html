@@ -542,6 +542,62 @@
       .sort((a,b) => timeToMinutes(a.start) - timeToMinutes(b.start));
   }
 
+  const TODO_CATEGORIES = [
+    { key: 'school', label: 'School / Work' },
+    { key: 'home', label: 'Home' }
+  ];
+  const TODO_PRIORITY_COLORS = { 1: '#F2836E', 2: '#E8B23D', 3: '#3EBBA9' };
+  function priorityColor(p){ return TODO_PRIORITY_COLORS[p] || TODO_PRIORITY_COLORS[2]; }
+
+  function normalizeTodoTask(t){
+    t = t || {};
+    return {
+      id: t.id || makeId(),
+      text: t.text || '',
+      category: t.category === 'home' ? 'home' : 'school',
+      priority: [1,2,3].includes(t.priority) ? t.priority : 2,
+      dueDate: /^\d{4}-\d{2}-\d{2}$/.test(t.dueDate) ? t.dueDate : null,
+      done: !!t.done
+    };
+  }
+  function normalizeTodoTasks(list){ return asArray(list).map(normalizeTodoTask); }
+
+  function topPriorityTasks(n){
+    return state.todoTasks
+      .filter(t => !t.done)
+      .slice()
+      .sort((a,b) => (a.priority - b.priority) || (a.dueDate || '9999-99-99').localeCompare(b.dueDate || '9999-99-99'))
+      .slice(0, n);
+  }
+
+  function dateInRange(iso, start, end){
+    const d = new Date(iso + 'T00:00:00');
+    return d >= start && d < end;
+  }
+
+  function todoTimeRange(key){
+    const now = new Date();
+    if(key === 'week'){
+      const start = startOfWeek(now, 0);
+      return { start, end: new Date(start.getTime() + 7*24*60*60*1000), label: 'This Week' };
+    }
+    if(key === 'month'){
+      const start = startOfMonth(now, 0);
+      return { start, end: new Date(start.getFullYear(), start.getMonth()+1, 1), label: 'This Month' };
+    }
+    const start = new Date(now.getFullYear(), 0, 1);
+    return { start, end: new Date(now.getFullYear()+1, 0, 1), label: 'This Year' };
+  }
+
+  function todoTasksForTimeView(key){
+    const { start, end, label } = todoTimeRange(key);
+    const tasks = state.todoTasks
+      .filter(t => !t.done && t.dueDate && dateInRange(t.dueDate, start, end))
+      .slice()
+      .sort((a,b) => a.dueDate.localeCompare(b.dueDate) || (a.priority - b.priority));
+    return { label, tasks };
+  }
+
   const FIREBASE_CONFIG = {
     apiKey: "AIzaSyCNVjKV-vf1bdAbEQwqXZufktjqvF9kxRc",
     authDomain: "personal-goals-app-32e5b.firebaseapp.com",
@@ -583,6 +639,11 @@
     addingSavingsGoal: false,
     savingsDeleteArmed: false,
     financeCategory: null,
+    todoTasks: [],
+    todoCategory: null,
+    todoTimeView: null,
+    addingTodoTask: false,
+    newTodoPriority: 2,
     importPending: null,
     importStatus: '',
     sync: { status: 'connecting', lastSynced: null }
@@ -635,8 +696,8 @@
     fbDb.ref(SYNC_PATH).on('value', snap => {
       const val = snap.val();
       if(!val || !val.projects){ render(); return; }
-      const incomingStr = JSON.stringify({ projects: val.projects, budgets: val.budgets, savingsGoals: val.savingsGoals, earnings: val.earnings, calendarBlocks: val.calendarBlocks });
-      if(incomingStr === JSON.stringify({ projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings, calendarBlocks: state.calendarBlocks })){
+      const incomingStr = JSON.stringify({ projects: val.projects, budgets: val.budgets, savingsGoals: val.savingsGoals, earnings: val.earnings, calendarBlocks: val.calendarBlocks, todoTasks: val.todoTasks });
+      if(incomingStr === JSON.stringify({ projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings, calendarBlocks: state.calendarBlocks, todoTasks: state.todoTasks })){
         state.sync.lastSynced = val.updatedAt || new Date().toISOString();
         render();
         return;
@@ -650,8 +711,9 @@
       state.savingsGoals = normalizeSavingsGoals(val.savingsGoals);
       state.earnings = normalizeEarnings(val.earnings);
       state.calendarBlocks = normalizeCalendarBlocks(val.calendarBlocks);
+      state.todoTasks = normalizeTodoTasks(val.todoTasks);
       state.sync.lastSynced = val.updatedAt || new Date().toISOString();
-      try{ localStorage.setItem(STORAGE_KEY, JSON.stringify({ projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings, calendarBlocks: state.calendarBlocks })); }catch(e){}
+      try{ localStorage.setItem(STORAGE_KEY, JSON.stringify({ projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings, calendarBlocks: state.calendarBlocks, todoTasks: state.todoTasks })); }catch(e){}
       render();
     }, () => {
       state.sync.status = 'error';
@@ -661,7 +723,7 @@
 
   function pushToCloud(){
     if(!fbDb || !state.user) return;
-    const payload = { projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings, calendarBlocks: state.calendarBlocks, updatedAt: new Date().toISOString() };
+    const payload = { projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings, calendarBlocks: state.calendarBlocks, todoTasks: state.todoTasks, updatedAt: new Date().toISOString() };
     fbDb.ref(SYNC_PATH).set(payload).then(() => {
       state.sync.lastSynced = payload.updatedAt;
     }).catch(() => {
@@ -681,26 +743,29 @@
         state.savingsGoals = [];
         state.earnings = [];
         state.calendarBlocks = defaultCalendarBlocks();
+        state.todoTasks = [];
       } else if(parsed){
         state.projects = normalizeProjects(parsed.projects);
         state.budgets = normalizeBudgets(parsed.budgets);
         state.savingsGoals = normalizeSavingsGoals(parsed.savingsGoals);
         state.earnings = normalizeEarnings(parsed.earnings);
         state.calendarBlocks = parsed.calendarBlocks ? normalizeCalendarBlocks(parsed.calendarBlocks) : defaultCalendarBlocks();
+        state.todoTasks = normalizeTodoTasks(parsed.todoTasks);
       } else {
         state.projects = defaultData();
         state.budgets = [];
         state.savingsGoals = [];
         state.earnings = [];
         state.calendarBlocks = defaultCalendarBlocks();
+        state.todoTasks = [];
       }
-    }catch(e){ state.projects = defaultData(); state.budgets = []; state.savingsGoals = []; state.earnings = []; state.calendarBlocks = defaultCalendarBlocks(); }
+    }catch(e){ state.projects = defaultData(); state.budgets = []; state.savingsGoals = []; state.earnings = []; state.calendarBlocks = defaultCalendarBlocks(); state.todoTasks = []; }
     state.loaded = true;
     render();
     initFirebase();
   }
   function save(rerender){
-    try{ localStorage.setItem(STORAGE_KEY, JSON.stringify({ projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings, calendarBlocks: state.calendarBlocks })); }catch(e){}
+    try{ localStorage.setItem(STORAGE_KEY, JSON.stringify({ projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings, calendarBlocks: state.calendarBlocks, todoTasks: state.todoTasks })); }catch(e){}
     pushToCloud();
     if(rerender !== false) render();
   }
@@ -805,7 +870,7 @@
           <input type="file" id="import-file" accept="application/json" style="display:none" />
         </div>
         ${state.importPending ? `
-        <div class="sync-sub" style="color:var(--gold); margin-top:10px;">This will replace the data on this device with the imported file (${state.importPending.projects.length} project${state.importPending.projects.length===1?'':'s'}, ${state.importPending.budgets.length} budget${state.importPending.budgets.length===1?'':'s'}, ${state.importPending.savingsGoals.length} savings goal${state.importPending.savingsGoals.length===1?'':'s'}, ${state.importPending.earnings.length} earning${state.importPending.earnings.length===1?'':'s'}, ${state.importPending.calendarBlocks.length} calendar block${state.importPending.calendarBlocks.length===1?'':'s'}).</div>
+        <div class="sync-sub" style="color:var(--gold); margin-top:10px;">This will replace the data on this device with the imported file (${state.importPending.projects.length} project${state.importPending.projects.length===1?'':'s'}, ${state.importPending.budgets.length} budget${state.importPending.budgets.length===1?'':'s'}, ${state.importPending.savingsGoals.length} savings goal${state.importPending.savingsGoals.length===1?'':'s'}, ${state.importPending.earnings.length} earning${state.importPending.earnings.length===1?'':'s'}, ${state.importPending.calendarBlocks.length} calendar block${state.importPending.calendarBlocks.length===1?'':'s'}, ${state.importPending.todoTasks.length} to-do task${state.importPending.todoTasks.length===1?'':'s'}).</div>
         <div class="sync-btn-row">
           <button class="sync-btn" id="import-confirm-btn">Replace with imported data</button>
           <button class="sync-btn secondary" id="import-cancel-btn">Cancel</button>
@@ -1022,6 +1087,118 @@
       <div class="card">
         <div class="empty" style="padding:10px 2px;">This section is coming soon — tell me what you want to track here and we'll build it out.</div>
       </div>`;
+  }
+
+  function renderPriorityPicker(group, selected){
+    return `<div style="display:flex; gap:8px;">
+      ${[1,2,3].map(p => {
+        const sel = p === selected;
+        const color = priorityColor(p);
+        const label = p === 1 ? '1 · Highest' : p === 2 ? '2 · Medium' : '3 · Low';
+        return `<button type="button" data-priority-pick="${p}" data-priority-group="${group}" style="flex:1; padding:9px 6px; border-radius:10px; border:1.5px solid ${sel ? color : 'var(--line)'}; background:${sel ? color + '26' : 'var(--card)'}; color:var(--ink); font-size:11px; font-weight:600; font-family:var(--font-body);">${label}</button>`;
+      }).join('')}
+    </div>`;
+  }
+
+  function renderTodoRow(t, showCategory){
+    const color = priorityColor(t.priority);
+    const catLabel = (TODO_CATEGORIES.find(c => c.key === t.category) || {}).label || '';
+    return `
+      <div class="item-card" style="border-left-color:${color};">
+        <div class="row">
+          <button class="check ${t.done?'done':''}" style="--cat-color:${color}" data-toggle-todo="${t.id}"></button>
+          <div class="txt ${t.done?'done':''}">${escapeHtml(t.text)}</div>
+          <div class="btn-row">
+            <button class="icon-btn" data-del-todo="${t.id}">✕</button>
+          </div>
+        </div>
+        <div style="display:flex; align-items:center; gap:8px; margin-top:10px; padding-left:33px; flex-wrap:wrap;">
+          <div style="display:flex; gap:4px;">
+            ${[1,2,3].map(p => `<button data-set-priority="${t.id}" data-priority-val="${p}" style="width:24px; height:24px; border-radius:7px; border:1.5px solid ${t.priority===p ? priorityColor(p) : 'var(--line)'}; background:${t.priority===p ? priorityColor(p) + '26' : 'var(--bg)'}; color:var(--ink); font-family:var(--font-mono); font-size:10.5px; font-weight:700;">${p}</button>`).join('')}
+          </div>
+          <input type="date" data-due-date="${t.id}" value="${t.dueDate || ''}" style="flex:1; min-width:118px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--ink); padding:5px 8px; font-size:11px; font-family:var(--font-mono);" />
+          ${showCategory ? `<span style="font-size:9.5px; font-family:var(--font-mono); color:var(--ink-soft); text-transform:uppercase; letter-spacing:.04em; white-space:nowrap;">${catLabel}</span>` : ''}
+        </div>
+      </div>`;
+  }
+
+  function renderTodoAddForm(){
+    return state.addingTodoTask ? `
+      <div class="card">
+        <div class="k">New Task</div>
+        <input type="text" id="new-todo-text" placeholder="What do you need to do?" class="money-input" style="margin-bottom:8px;" />
+        <input type="date" id="new-todo-due" class="money-input" style="margin-bottom:12px;" />
+        <div class="k">Priority</div>
+        <div style="margin-bottom:14px;">${renderPriorityPicker('new', state.newTodoPriority)}</div>
+        <div class="sync-btn-row">
+          <button class="sync-btn" id="new-todo-save">Add task</button>
+          <button class="sync-btn secondary" id="new-todo-cancel">Cancel</button>
+        </div>
+      </div>` : `
+      <button class="card" id="add-todo-btn" style="width:100%; text-align:center; color:var(--ink-soft); cursor:pointer;">
+        <div style="font-size:20px; font-family:var(--font-display); line-height:1;">+</div>
+        <div style="font-family:var(--font-display); font-weight:600; font-size:12.5px; margin-top:4px;">New task</div>
+      </button>`;
+  }
+
+  function renderTodoCategoryCard(key){
+    const meta = TODO_CATEGORIES.find(c => c.key === key);
+    const openCt = state.todoTasks.filter(t => t.category === key && !t.done).length;
+    return `<button class="item-card" style="display:block; width:100%; text-align:left; border-left-color:var(--indigo);" data-open-todo-category="${key}">
+      <div style="font-weight:600; font-size:15px;">${meta.label}</div>
+      <div class="proj-sub" style="margin-top:6px;">${openCt} open task${openCt===1?'':'s'}</div>
+    </button>`;
+  }
+
+  function renderTodoTimeCard(key){
+    const { label, tasks } = todoTasksForTimeView(key);
+    return `<button class="item-card" style="display:block; width:100%; text-align:left; border-left-color:var(--forest);" data-open-todo-time="${key}">
+      <div style="font-weight:600; font-size:15px;">${label}</div>
+      <div class="proj-sub" style="margin-top:6px;">${tasks.length} task${tasks.length===1?'':'s'} due</div>
+    </button>`;
+  }
+
+  function renderTodoTab(){
+    const top5 = topPriorityTasks(5);
+    return `
+      <div class="section-title">To-Do</div>
+      <div class="section-sub">Your top priorities, plus quick links to everything else.</div>
+
+      <div class="k">Top Priorities</div>
+      ${top5.length ? top5.map(t => renderTodoRow(t, true)).join('') : '<div class="empty">Nothing on your plate — add a task from School/Work or Home below.</div>'}
+
+      <div class="section-title" style="font-size:16px; margin-top:24px;">Lists</div>
+      ${renderTodoCategoryCard('school')}
+      ${renderTodoCategoryCard('home')}
+
+      <div class="section-title" style="font-size:16px; margin-top:24px;">Coming Up</div>
+      ${renderTodoTimeCard('week')}
+      ${renderTodoTimeCard('month')}
+      ${renderTodoTimeCard('year')}`;
+  }
+
+  function renderTodoCategoryDetail(key){
+    const meta = TODO_CATEGORIES.find(c => c.key === key) || { label: 'Tasks' };
+    const top5Ids = topPriorityTasks(5).map(t => t.id);
+    const tasks = state.todoTasks
+      .filter(t => t.category === key && !top5Ids.includes(t.id))
+      .slice()
+      .sort((a,b) => (a.done - b.done) || (a.priority - b.priority) || (a.dueDate || '9999-99-99').localeCompare(b.dueDate || '9999-99-99'));
+    return `
+      <button class="back-link" id="back-btn">← To-Do</button>
+      <div class="section-title">${meta.label}</div>
+      <div class="section-sub">Your top 5 priorities show up on the main To-Do page — everything else lives here.</div>
+      ${tasks.length ? tasks.map(t => renderTodoRow(t, false)).join('') : '<div class="empty">No tasks here yet.</div>'}
+      ${renderTodoAddForm()}`;
+  }
+
+  function renderTodoTimeViewDetail(key){
+    const { label, tasks } = todoTasksForTimeView(key);
+    return `
+      <button class="back-link" id="back-btn">← To-Do</button>
+      <div class="section-title">${label}</div>
+      <div class="section-sub">Everything due in this window, across both lists.</div>
+      ${tasks.length ? tasks.map(t => renderTodoRow(t, true)).join('') : '<div class="empty">Nothing due in this window.</div>'}`;
   }
 
   function renderBudgetListBody(periodKey, label){
@@ -1425,12 +1602,16 @@
       const b = state.calendarBlocks.find(x => x.id === state.activeCalendarBlock);
       if(!b){ state.view = 'tab'; state.tab = 'calendar'; bodyHtml = renderCalendarTab(); }
       else bodyHtml = renderCalendarBlockDetail(b);
+    } else if(state.view === 'todoCategory'){
+      bodyHtml = renderTodoCategoryDetail(state.todoCategory);
+    } else if(state.view === 'todoTimeView'){
+      bodyHtml = renderTodoTimeViewDetail(state.todoTimeView);
     } else {
       if(state.tab === 'calendar') bodyHtml = renderCalendarTab();
       else if(state.tab === 'projects') bodyHtml = renderProjectsTab();
       else if(state.tab === 'finance') bodyHtml = renderFinanceTab();
       else if(state.tab === 'school') bodyHtml = renderPlaceholderTab('School', 'Classes, assignments, and deadlines.');
-      else if(state.tab === 'todo') bodyHtml = renderPlaceholderTab('To-Do List', 'Daily tasks and reminders.');
+      else if(state.tab === 'todo') bodyHtml = renderTodoTab();
       else if(state.tab === 'goals') bodyHtml = renderPlaceholderTab('Goals', 'Personal goals and habits you want to build.');
       else if(state.tab === 'groceries') bodyHtml = renderPlaceholderTab('Groceries', 'Shopping list for whatever you need to pick up.');
       else if(state.tab === 'cookbook') bodyHtml = renderPlaceholderTab('Cookbook', 'Recipes worth keeping around.');
@@ -1477,6 +1658,9 @@
         state.addingCalendarBlock = false;
         state.calendarBlockDeleteArmed = false;
         state.calendarMonthView = false;
+        state.todoCategory = null;
+        state.todoTimeView = null;
+        state.addingTodoTask = false;
         render(); window.scrollTo(0,0);
       });
     });
@@ -1499,6 +1683,11 @@
         state.view = 'tab';
         state.activeCalendarBlock = null;
         state.calendarBlockDeleteArmed = false;
+      } else if(state.view === 'todoCategory' || state.view === 'todoTimeView'){
+        state.view = 'tab';
+        state.todoCategory = null;
+        state.todoTimeView = null;
+        state.addingTodoTask = false;
       } else {
         state.view = 'tab';
         state.activeProject = null;
@@ -1540,6 +1729,7 @@
         state.savingsGoals = state.importPending.savingsGoals;
         state.earnings = state.importPending.earnings;
         state.calendarBlocks = state.importPending.calendarBlocks;
+        state.todoTasks = state.importPending.todoTasks;
         state.importPending = null;
         state.importStatus = 'ok:Import complete.';
         save();
@@ -1960,6 +2150,65 @@
       return;
     }
 
+    if(state.view === 'tab' && state.tab === 'todo'){
+      root.querySelectorAll('[data-open-todo-category]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          state.todoCategory = btn.getAttribute('data-open-todo-category');
+          state.view = 'todoCategory';
+          render(); window.scrollTo(0,0);
+        });
+      });
+      root.querySelectorAll('[data-open-todo-time]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          state.todoTimeView = btn.getAttribute('data-open-todo-time');
+          state.view = 'todoTimeView';
+          render(); window.scrollTo(0,0);
+        });
+      });
+      wireTodoRowInteractions();
+      return;
+    }
+
+    if(state.view === 'todoCategory'){
+      wireTodoRowInteractions();
+      if(state.addingTodoTask){
+        const textInput = root.querySelector('#new-todo-text');
+        const dueInput = root.querySelector('#new-todo-due');
+        const saveBtn = root.querySelector('#new-todo-save');
+        const cancelBtn = root.querySelector('#new-todo-cancel');
+        if(textInput) textInput.focus();
+        const priorityButtons = root.querySelectorAll('[data-priority-pick][data-priority-group="new"]');
+        priorityButtons.forEach(pBtn => {
+          pBtn.addEventListener('click', () => {
+            state.newTodoPriority = parseInt(pBtn.getAttribute('data-priority-pick'), 10);
+            priorityButtons.forEach(other => {
+              const p = parseInt(other.getAttribute('data-priority-pick'), 10);
+              const color = priorityColor(p);
+              const sel = p === state.newTodoPriority;
+              other.style.borderColor = sel ? color : 'var(--line)';
+              other.style.background = sel ? color + '26' : 'var(--card)';
+            });
+          });
+        });
+        const doSave = () => {
+          const text = textInput.value.trim();
+          if(!text) return;
+          addTodoTask(text, state.todoCategory, state.newTodoPriority, dueInput.value || null);
+        };
+        saveBtn.addEventListener('click', doSave);
+        cancelBtn.addEventListener('click', () => { state.addingTodoTask = false; state.newTodoPriority = 2; render(); });
+      } else {
+        const addBtn = root.querySelector('#add-todo-btn');
+        if(addBtn) addBtn.addEventListener('click', () => { state.addingTodoTask = true; render(); });
+      }
+      return;
+    }
+
+    if(state.view === 'todoTimeView'){
+      wireTodoRowInteractions();
+      return;
+    }
+
     if(state.view === 'project'){
       const p = state.projects.find(x => x.id === state.activeProject);
       if(!p) return;
@@ -2051,8 +2300,48 @@
     save();
   }
 
+  function wireTodoRowInteractions(){
+    root.querySelectorAll('[data-toggle-todo]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = btn.getAttribute('data-toggle-todo');
+        const t = state.todoTasks.find(x => x.id === id);
+        if(t){ t.done = !t.done; save(); }
+      });
+    });
+    root.querySelectorAll('[data-del-todo]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = btn.getAttribute('data-del-todo');
+        state.todoTasks = state.todoTasks.filter(x => x.id !== id);
+        save();
+      });
+    });
+    root.querySelectorAll('[data-set-priority]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = btn.getAttribute('data-set-priority');
+        const p = parseInt(btn.getAttribute('data-priority-val'), 10);
+        const t = state.todoTasks.find(x => x.id === id);
+        if(t){ t.priority = p; save(); }
+      });
+    });
+    root.querySelectorAll('[data-due-date]').forEach(input => {
+      input.addEventListener('change', () => {
+        const id = input.getAttribute('data-due-date');
+        const t = state.todoTasks.find(x => x.id === id);
+        if(t){ t.dueDate = input.value || null; save(); }
+      });
+    });
+  }
+
+  function addTodoTask(text, category, priority, dueDate){
+    const newT = { id: makeId(), text: text.trim(), category: category === 'home' ? 'home' : 'school', priority, dueDate: dueDate || null, done: false };
+    state.todoTasks.push(newT);
+    state.addingTodoTask = false;
+    state.newTodoPriority = 2;
+    save();
+  }
+
   function exportData(){
-    const payload = { app: 'project-hub', version: 1, exportedAt: new Date().toISOString(), projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings, calendarBlocks: state.calendarBlocks };
+    const payload = { app: 'project-hub', version: 1, exportedAt: new Date().toISOString(), projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings, calendarBlocks: state.calendarBlocks, todoTasks: state.todoTasks };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -2076,7 +2365,8 @@
           budgets: normalizeBudgets(parsed && parsed.budgets),
           savingsGoals: normalizeSavingsGoals(parsed && parsed.savingsGoals),
           earnings: normalizeEarnings(parsed && parsed.earnings),
-          calendarBlocks: normalizeCalendarBlocks(parsed && parsed.calendarBlocks)
+          calendarBlocks: normalizeCalendarBlocks(parsed && parsed.calendarBlocks),
+          todoTasks: normalizeTodoTasks(parsed && parsed.todoTasks)
         };
         state.importStatus = '';
         render();
