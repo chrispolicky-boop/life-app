@@ -881,7 +881,6 @@
       </button>`;
     return `
       <div class="section-title">Calendar</div>
-      <div class="section-sub">Plan your day block by block, like a missionary schedule.</div>
       ${renderDayStrip(selectedIso)}
       <div class="section-title" style="font-size:15px; margin-bottom:10px;">${selectedDateObj.toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric' })}</div>
       ${renderTimeline(blocks)}
