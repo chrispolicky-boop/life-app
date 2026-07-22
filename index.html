@@ -456,6 +456,27 @@
   function savingsPct(g){ return g.target ? Math.round((savedOf(g) / g.target) * 100) : 0; }
   function savingsBarColor(p){ return p >= 100 ? 'var(--forest)' : 'var(--teal)'; }
 
+  function normalizeEarning(e){
+    e = e || {};
+    return { id: e.id || makeId(), amount: toMoney(e.amount), note: e.note || '', date: e.date || new Date().toISOString() };
+  }
+  function normalizeEarnings(list){ return asArray(list).map(normalizeEarning); }
+  function computeEarningsBuckets(count){
+    const now = new Date();
+    const buckets = [];
+    for(let i = count - 1; i >= 0; i--){
+      const start = startOfMonth(now, i);
+      const end = new Date(start.getFullYear(), start.getMonth()+1, 1);
+      buckets.push({ start, end, label: shortMonthLabel(start), total: 0 });
+    }
+    state.earnings.forEach(e => {
+      const d = new Date(e.date || Date.now());
+      const bucket = buckets.find(bk => d >= bk.start && d < bk.end);
+      if(bucket) bucket.total += e.amount;
+    });
+    return buckets;
+  }
+
   const FIREBASE_CONFIG = {
     apiKey: "AIzaSyCNVjKV-vf1bdAbEQwqXZufktjqvF9kxRc",
     authDomain: "personal-goals-app-32e5b.firebaseapp.com",
@@ -478,6 +499,7 @@
     budgets: [],
     activeSavingsGoal: null,
     savingsGoals: [],
+    earnings: [],
     loaded: false,
     user: null,
     passcodeError: '',
@@ -540,8 +562,8 @@
     fbDb.ref(SYNC_PATH).on('value', snap => {
       const val = snap.val();
       if(!val || !val.projects){ render(); return; }
-      const incomingStr = JSON.stringify({ projects: val.projects, budgets: val.budgets, savingsGoals: val.savingsGoals });
-      if(incomingStr === JSON.stringify({ projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals })){
+      const incomingStr = JSON.stringify({ projects: val.projects, budgets: val.budgets, savingsGoals: val.savingsGoals, earnings: val.earnings });
+      if(incomingStr === JSON.stringify({ projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings })){
         state.sync.lastSynced = val.updatedAt || new Date().toISOString();
         render();
         return;
@@ -553,8 +575,9 @@
       state.projects = normalizeProjects(val.projects);
       state.budgets = normalizeBudgets(val.budgets);
       state.savingsGoals = normalizeSavingsGoals(val.savingsGoals);
+      state.earnings = normalizeEarnings(val.earnings);
       state.sync.lastSynced = val.updatedAt || new Date().toISOString();
-      try{ localStorage.setItem(STORAGE_KEY, JSON.stringify({ projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals })); }catch(e){}
+      try{ localStorage.setItem(STORAGE_KEY, JSON.stringify({ projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings })); }catch(e){}
       render();
     }, () => {
       state.sync.status = 'error';
@@ -564,7 +587,7 @@
 
   function pushToCloud(){
     if(!fbDb || !state.user) return;
-    const payload = { projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, updatedAt: new Date().toISOString() };
+    const payload = { projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings, updatedAt: new Date().toISOString() };
     fbDb.ref(SYNC_PATH).set(payload).then(() => {
       state.sync.lastSynced = payload.updatedAt;
     }).catch(() => {
@@ -582,22 +605,25 @@
         state.projects = normalizeProjects(parsed);
         state.budgets = [];
         state.savingsGoals = [];
+        state.earnings = [];
       } else if(parsed){
         state.projects = normalizeProjects(parsed.projects);
         state.budgets = normalizeBudgets(parsed.budgets);
         state.savingsGoals = normalizeSavingsGoals(parsed.savingsGoals);
+        state.earnings = normalizeEarnings(parsed.earnings);
       } else {
         state.projects = defaultData();
         state.budgets = [];
         state.savingsGoals = [];
+        state.earnings = [];
       }
-    }catch(e){ state.projects = defaultData(); state.budgets = []; state.savingsGoals = []; }
+    }catch(e){ state.projects = defaultData(); state.budgets = []; state.savingsGoals = []; state.earnings = []; }
     state.loaded = true;
     render();
     initFirebase();
   }
   function save(rerender){
-    try{ localStorage.setItem(STORAGE_KEY, JSON.stringify({ projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals })); }catch(e){}
+    try{ localStorage.setItem(STORAGE_KEY, JSON.stringify({ projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings })); }catch(e){}
     pushToCloud();
     if(rerender !== false) render();
   }
@@ -702,7 +728,7 @@
           <input type="file" id="import-file" accept="application/json" style="display:none" />
         </div>
         ${state.importPending ? `
-        <div class="sync-sub" style="color:var(--gold); margin-top:10px;">This will replace the data on this device with the imported file (${state.importPending.projects.length} project${state.importPending.projects.length===1?'':'s'}, ${state.importPending.budgets.length} budget${state.importPending.budgets.length===1?'':'s'}, ${state.importPending.savingsGoals.length} savings goal${state.importPending.savingsGoals.length===1?'':'s'}).</div>
+        <div class="sync-sub" style="color:var(--gold); margin-top:10px;">This will replace the data on this device with the imported file (${state.importPending.projects.length} project${state.importPending.projects.length===1?'':'s'}, ${state.importPending.budgets.length} budget${state.importPending.budgets.length===1?'':'s'}, ${state.importPending.savingsGoals.length} savings goal${state.importPending.savingsGoals.length===1?'':'s'}, ${state.importPending.earnings.length} earning${state.importPending.earnings.length===1?'':'s'}).</div>
         <div class="sync-btn-row">
           <button class="sync-btn" id="import-confirm-btn">Replace with imported data</button>
           <button class="sync-btn secondary" id="import-cancel-btn">Cancel</button>
@@ -808,8 +834,54 @@
     { key: 'weekly', label: 'Weekly' },
     { key: 'monthly', label: 'Monthly' },
     { key: 'yearly', label: 'Yearly' },
-    { key: 'savings', label: 'Savings' }
+    { key: 'savings', label: 'Savings' },
+    { key: 'earnings', label: 'Earnings' }
   ];
+
+  function renderEarningsCard(){
+    const buckets = computeEarningsBuckets(5);
+    const thisMonth = buckets[buckets.length - 1].total;
+    const maxRecent = Math.max(...buckets.map(b => b.total), 1);
+    const p = Math.round((thisMonth / maxRecent) * 100);
+    return `
+      <button class="item-card" style="display:block; width:100%; text-align:left; border-left-color:var(--forest);" data-open-category="earnings">
+        <div style="display:flex; justify-content:space-between; align-items:baseline; gap:8px; margin-bottom:10px;">
+          <div style="font-weight:600; font-size:15px;">Earnings</div>
+          <div style="font-family:var(--font-mono); font-size:12px; color:var(--ink-soft); white-space:nowrap;">${fmtMoney(thisMonth)} this month</div>
+        </div>
+        ${barHTML(p, false, 'var(--forest)')}
+        <div class="proj-sub" style="margin-top:8px;">${state.earnings.length} ${state.earnings.length===1?'entry':'entries'} logged</div>
+      </button>`;
+  }
+
+  function renderEarningsListBody(){
+    const rows = state.earnings.slice().reverse().map(e => `
+      <div class="item-card" style="border-left-color:var(--forest);">
+        <div class="row">
+          <div class="txt">${escapeHtml(e.note || 'Earnings')}</div>
+          <div style="font-family:var(--font-mono); font-size:13px; padding-top:2px;">${fmtMoney(e.amount)}</div>
+          <div class="btn-row">
+            <button class="icon-btn" data-del-earning="${e.id}">✕</button>
+          </div>
+        </div>
+      </div>`).join('');
+    return `
+      ${rows || '<div class="empty">No earnings logged yet.</div>'}
+      <div class="add-row">
+        <input type="number" id="earning-amount" placeholder="Amount" inputmode="decimal" style="max-width:100px;" />
+        <input type="text" id="earning-note" placeholder="Source (optional)" />
+        <button id="add-earning-btn">Add</button>
+      </div>`;
+  }
+
+  function renderEarningsTrend(){
+    const buckets = computeEarningsBuckets(5);
+    return `
+      <div class="card">
+        <div class="k">Last 5 months</div>
+        ${lineChartSVG(buckets, 0)}
+      </div>`;
+  }
 
   function renderFinanceCategoryCard(key, label){
     let current, max, color, count, unit;
@@ -839,7 +911,7 @@
   }
 
   function renderFinanceTab(){
-    const cards = FINANCE_CATEGORIES.map(c => renderFinanceCategoryCard(c.key, c.label)).join('');
+    const cards = FINANCE_CATEGORIES.map(c => c.key === 'earnings' ? renderEarningsCard() : renderFinanceCategoryCard(c.key, c.label)).join('');
     return `
       <div class="section-title">Finance</div>
       <div class="section-sub">Tap a category to see the budgets or goals inside it.</div>
@@ -847,6 +919,14 @@
   }
 
   function renderFinanceCategoryDetail(categoryKey){
+    if(categoryKey === 'earnings'){
+      return `
+        <button class="back-link" id="back-btn">← Finance</button>
+        <div class="section-title">Earnings</div>
+        <div class="section-sub">Log income and track your total over time.</div>
+        ${renderEarningsTrend()}
+        ${renderEarningsListBody()}`;
+    }
     const cat = FINANCE_CATEGORIES.find(c => c.key === categoryKey);
     const label = cat ? cat.label : '';
     const body = categoryKey === 'savings'
@@ -1180,6 +1260,7 @@
         state.projects = state.importPending.projects;
         state.budgets = state.importPending.budgets;
         state.savingsGoals = state.importPending.savingsGoals;
+        state.earnings = state.importPending.earnings;
         state.importPending = null;
         state.importStatus = 'ok:Import complete.';
         save();
@@ -1258,6 +1339,29 @@
         const addSavingsBtn = root.querySelector('#add-savings-btn');
         if(addSavingsBtn) addSavingsBtn.addEventListener('click', () => { state.addingSavingsGoal = true; render(); });
       }
+      return;
+    }
+
+    if(state.view === 'financeCategory' && state.financeCategory === 'earnings'){
+      root.querySelectorAll('[data-del-earning]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const id = btn.getAttribute('data-del-earning');
+          state.earnings = state.earnings.filter(x => x.id !== id);
+          save();
+        });
+      });
+      const amountInput = root.querySelector('#earning-amount');
+      const noteInput = root.querySelector('#earning-note');
+      const addEarningBtn = root.querySelector('#add-earning-btn');
+      const doAddEarning = () => {
+        const amount = toMoney(amountInput.value);
+        if(amount <= 0) return;
+        state.earnings.push({ id: makeId(), amount, note: noteInput.value.trim(), date: new Date().toISOString() });
+        save();
+      };
+      addEarningBtn.addEventListener('click', doAddEarning);
+      noteInput.addEventListener('keydown', e => { if(e.key === 'Enter') doAddEarning(); });
+      amountInput.addEventListener('keydown', e => { if(e.key === 'Enter') doAddEarning(); });
       return;
     }
 
@@ -1468,7 +1572,7 @@
   }
 
   function exportData(){
-    const payload = { app: 'project-hub', version: 1, exportedAt: new Date().toISOString(), projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals };
+    const payload = { app: 'project-hub', version: 1, exportedAt: new Date().toISOString(), projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -1490,7 +1594,8 @@
         state.importPending = {
           projects: normalizeProjects(incomingProjects),
           budgets: normalizeBudgets(parsed && parsed.budgets),
-          savingsGoals: normalizeSavingsGoals(parsed && parsed.savingsGoals)
+          savingsGoals: normalizeSavingsGoals(parsed && parsed.savingsGoals),
+          earnings: normalizeEarnings(parsed && parsed.earnings)
         };
         state.importStatus = '';
         render();
