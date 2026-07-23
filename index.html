@@ -816,6 +816,7 @@
     recipeDeleteArmed: false,
     newIngredientCategory: 'vegetables',
     recipeUseStatus: '',
+    addingToGroceries: false,
     importPending: null,
     importStatus: '',
     sync: { status: 'connecting', lastSynced: null }
@@ -1605,12 +1606,29 @@
         <div class="hsub">${meta.label}</div>
       </div>
 
+      ${state.addingToGroceries ? `
+      <div class="card">
+        <div class="k">Select ingredients to add</div>
+        <div class="sync-btn-row" style="margin-bottom:12px;">
+          <button class="sync-btn secondary" id="select-all-ingredients-btn">Select all</button>
+          <button class="sync-btn secondary" id="select-none-ingredients-btn">Select none</button>
+        </div>
+        ${r.ingredients.map(ing => `
+          <label style="display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid var(--line); font-size:14px;">
+            <input type="checkbox" data-select-ingredient="${ing.id}" checked style="width:18px; height:18px; flex-shrink:0;" />
+            <span>${escapeHtml(ing.text)}</span>
+          </label>`).join('')}
+        <div class="sync-btn-row" style="margin-top:14px;">
+          <button class="sync-btn" id="confirm-use-recipe-btn">Add selected to Groceries</button>
+          <button class="sync-btn secondary" id="cancel-use-recipe-btn">Cancel</button>
+        </div>
+      </div>` : `
       <div class="card">
         <button class="ai-btn" style="--cat-color:var(--forest); margin-bottom:8px;" id="use-recipe-btn">Use this recipe — add ingredients to Groceries</button>
         <button class="ai-btn" style="--cat-color:var(--indigo);" id="estimate-recipe-btn">${icon('ai')} Estimate cost &amp; calories</button>
         <div class="ai-hint">Opens a new Claude chat with the ingredients and instructions pre-filled.</div>
         ${state.recipeUseStatus ? `<div class="sync-sub" style="color:var(--forest); margin-top:10px; text-align:center;">${escapeHtml(state.recipeUseStatus)}</div>` : ''}
-      </div>
+      </div>`}
 
       <div class="card">
         <div class="k">Ingredients</div>
@@ -2124,6 +2142,7 @@
         state.addingRecipe = false;
         state.recipeDeleteArmed = false;
         state.recipeUseStatus = '';
+        state.addingToGroceries = false;
         state.groceryView = 'active';
         render(); window.scrollTo(0,0);
       });
@@ -2167,6 +2186,7 @@
         state.activeRecipe = null;
         state.recipeDeleteArmed = false;
         state.recipeUseStatus = '';
+        state.addingToGroceries = false;
       } else if(state.view === 'recipeCategory'){
         state.view = 'tab';
         state.activeRecipeCategory = null;
@@ -2848,12 +2868,36 @@
 
       root.querySelector('[data-recipe-instructions]').addEventListener('blur', e => { r.instructions = e.target.value; save(); });
 
-      root.querySelector('#use-recipe-btn').addEventListener('click', () => { useRecipe(r); });
+      const useRecipeBtn = root.querySelector('#use-recipe-btn');
+      if(useRecipeBtn) useRecipeBtn.addEventListener('click', () => {
+        if(!r.ingredients.length){ state.recipeUseStatus = 'This recipe has no ingredients yet.'; render(); return; }
+        state.addingToGroceries = true;
+        state.recipeUseStatus = '';
+        render();
+      });
 
-      root.querySelector('#estimate-recipe-btn').addEventListener('click', () => {
+      const estimateBtn = root.querySelector('#estimate-recipe-btn');
+      if(estimateBtn) estimateBtn.addEventListener('click', () => {
         const url = 'https://claude.ai/new?q=' + encodeURIComponent(buildRecipeAiPrompt(r));
         window.open(url, '_blank', 'noopener');
       });
+
+      const selectAllBtn = root.querySelector('#select-all-ingredients-btn');
+      if(selectAllBtn) selectAllBtn.addEventListener('click', () => {
+        root.querySelectorAll('[data-select-ingredient]').forEach(cb => { cb.checked = true; });
+      });
+      const selectNoneBtn = root.querySelector('#select-none-ingredients-btn');
+      if(selectNoneBtn) selectNoneBtn.addEventListener('click', () => {
+        root.querySelectorAll('[data-select-ingredient]').forEach(cb => { cb.checked = false; });
+      });
+      const confirmUseBtn = root.querySelector('#confirm-use-recipe-btn');
+      if(confirmUseBtn) confirmUseBtn.addEventListener('click', () => {
+        const selectedIds = Array.from(root.querySelectorAll('[data-select-ingredient]:checked')).map(cb => cb.getAttribute('data-select-ingredient'));
+        const selected = r.ingredients.filter(ing => selectedIds.includes(ing.id));
+        useRecipe(r, selected);
+      });
+      const cancelUseBtn = root.querySelector('#cancel-use-recipe-btn');
+      if(cancelUseBtn) cancelUseBtn.addEventListener('click', () => { state.addingToGroceries = false; render(); });
 
       root.querySelectorAll('[data-del-ingredient]').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -3046,13 +3090,15 @@
     save();
   }
 
-  function useRecipe(r){
-    r.ingredients.forEach(ing => {
+  function useRecipe(r, ingredients){
+    const list = ingredients || r.ingredients;
+    list.forEach(ing => {
       state.groceryItems.push({ id: makeId(), category: ing.category, text: ing.text, done: false, fromRecipe: r.id });
     });
-    state.recipeUseStatus = r.ingredients.length
-      ? `Added ${r.ingredients.length} ingredient${r.ingredients.length===1?'':'s'} to your grocery list.`
-      : 'This recipe has no ingredients yet.';
+    state.recipeUseStatus = list.length
+      ? `Added ${list.length} ingredient${list.length===1?'':'s'} to your grocery list.`
+      : 'No ingredients selected.';
+    state.addingToGroceries = false;
     save();
   }
 
