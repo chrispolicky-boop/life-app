@@ -330,6 +330,57 @@
   }
   function normalizeGoals(list){ return asArray(list).map(normalizeGoal); }
 
+  const GROCERY_CATEGORIES = [
+    { key: 'dairy', label: 'Dairy' },
+    { key: 'meat', label: 'Meat' },
+    { key: 'vegetables', label: 'Vegetables' },
+    { key: 'fruit', label: 'Fruit' },
+    { key: 'canned', label: 'Canned Goods' },
+    { key: 'spices', label: 'Spices' },
+    { key: 'dry', label: 'Dry Goods' },
+    { key: 'snacks', label: 'Snacks' }
+  ];
+  function validGroceryCategory(key){ return GROCERY_CATEGORIES.some(c => c.key === key) ? key : 'dry'; }
+  function normalizeGroceryItem(i){
+    i = i || {};
+    return {
+      id: i.id || makeId(),
+      category: validGroceryCategory(i.category),
+      text: i.text || '',
+      done: !!i.done,
+      fromRecipe: i.fromRecipe || null
+    };
+  }
+  function normalizeGroceryItems(list){ return asArray(list).map(normalizeGroceryItem); }
+
+  const RECIPE_CATEGORIES = [
+    { key: 'breakfast', label: 'Breakfast' },
+    { key: 'lunch', label: 'Lunch' },
+    { key: 'dinner', label: 'Dinner' },
+    { key: 'dessert', label: 'Dessert' },
+    { key: 'pastries', label: 'Pastries' }
+  ];
+  function normalizeIngredient(ing){
+    ing = ing || {};
+    return {
+      id: ing.id || makeId(),
+      text: ing.text || '',
+      category: validGroceryCategory(ing.category)
+    };
+  }
+  function normalizeRecipe(r){
+    r = r || {};
+    const validCategory = RECIPE_CATEGORIES.some(c => c.key === r.category) ? r.category : 'dinner';
+    return {
+      id: r.id || makeId(),
+      category: validCategory,
+      title: r.title || 'Untitled recipe',
+      ingredients: asArray(r.ingredients).map(normalizeIngredient),
+      instructions: r.instructions || ''
+    };
+  }
+  function normalizeRecipes(list){ return asArray(list).map(normalizeRecipe); }
+
   const BUDGET_PERIODS = [
     { key: 'weekly', label: 'Weekly' },
     { key: 'monthly', label: 'Monthly' },
@@ -755,6 +806,14 @@
     activeGoal: null,
     addingGoal: false,
     goalDeleteArmed: false,
+    groceryItems: [],
+    recipes: [],
+    activeRecipeCategory: null,
+    activeRecipe: null,
+    addingRecipe: false,
+    recipeDeleteArmed: false,
+    newIngredientCategory: 'vegetables',
+    recipeUseStatus: '',
     importPending: null,
     importStatus: '',
     sync: { status: 'connecting', lastSynced: null }
@@ -807,8 +866,8 @@
     fbDb.ref(SYNC_PATH).on('value', snap => {
       const val = snap.val();
       if(!val || !val.projects){ render(); return; }
-      const incomingStr = JSON.stringify({ projects: val.projects, budgets: val.budgets, savingsGoals: val.savingsGoals, earnings: val.earnings, calendarBlocks: val.calendarBlocks, todoTasks: val.todoTasks, goals: val.goals });
-      if(incomingStr === JSON.stringify({ projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings, calendarBlocks: state.calendarBlocks, todoTasks: state.todoTasks, goals: state.goals })){
+      const incomingStr = JSON.stringify({ projects: val.projects, budgets: val.budgets, savingsGoals: val.savingsGoals, earnings: val.earnings, calendarBlocks: val.calendarBlocks, todoTasks: val.todoTasks, goals: val.goals, groceryItems: val.groceryItems, recipes: val.recipes });
+      if(incomingStr === JSON.stringify({ projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings, calendarBlocks: state.calendarBlocks, todoTasks: state.todoTasks, goals: state.goals, groceryItems: state.groceryItems, recipes: state.recipes })){
         state.sync.lastSynced = val.updatedAt || new Date().toISOString();
         render();
         return;
@@ -824,8 +883,10 @@
       state.calendarBlocks = normalizeCalendarBlocks(val.calendarBlocks);
       state.todoTasks = normalizeTodoTasks(val.todoTasks);
       state.goals = normalizeGoals(val.goals);
+      state.groceryItems = normalizeGroceryItems(val.groceryItems);
+      state.recipes = normalizeRecipes(val.recipes);
       state.sync.lastSynced = val.updatedAt || new Date().toISOString();
-      try{ localStorage.setItem(STORAGE_KEY, JSON.stringify({ projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings, calendarBlocks: state.calendarBlocks, todoTasks: state.todoTasks, goals: state.goals })); }catch(e){}
+      try{ localStorage.setItem(STORAGE_KEY, JSON.stringify({ projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings, calendarBlocks: state.calendarBlocks, todoTasks: state.todoTasks, goals: state.goals, groceryItems: state.groceryItems, recipes: state.recipes })); }catch(e){}
       render();
     }, () => {
       state.sync.status = 'error';
@@ -835,7 +896,7 @@
 
   function pushToCloud(){
     if(!fbDb || !state.user) return;
-    const payload = { projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings, calendarBlocks: state.calendarBlocks, todoTasks: state.todoTasks, goals: state.goals, updatedAt: new Date().toISOString() };
+    const payload = { projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings, calendarBlocks: state.calendarBlocks, todoTasks: state.todoTasks, goals: state.goals, groceryItems: state.groceryItems, recipes: state.recipes, updatedAt: new Date().toISOString() };
     fbDb.ref(SYNC_PATH).set(payload).then(() => {
       state.sync.lastSynced = payload.updatedAt;
     }).catch(() => {
@@ -857,6 +918,8 @@
         state.calendarBlocks = defaultCalendarBlocks();
         state.todoTasks = [];
         state.goals = [];
+        state.groceryItems = [];
+        state.recipes = [];
       } else if(parsed){
         state.projects = normalizeProjects(parsed.projects);
         state.budgets = normalizeBudgets(parsed.budgets);
@@ -865,6 +928,8 @@
         state.calendarBlocks = parsed.calendarBlocks ? normalizeCalendarBlocks(parsed.calendarBlocks) : defaultCalendarBlocks();
         state.todoTasks = normalizeTodoTasks(parsed.todoTasks);
         state.goals = normalizeGoals(parsed.goals);
+        state.groceryItems = normalizeGroceryItems(parsed.groceryItems);
+        state.recipes = normalizeRecipes(parsed.recipes);
       } else {
         state.projects = defaultData();
         state.budgets = [];
@@ -873,15 +938,17 @@
         state.calendarBlocks = defaultCalendarBlocks();
         state.todoTasks = [];
         state.goals = [];
+        state.groceryItems = [];
+        state.recipes = [];
       }
-    }catch(e){ state.projects = defaultData(); state.budgets = []; state.savingsGoals = []; state.earnings = []; state.calendarBlocks = defaultCalendarBlocks(); state.todoTasks = []; state.goals = []; }
+    }catch(e){ state.projects = defaultData(); state.budgets = []; state.savingsGoals = []; state.earnings = []; state.calendarBlocks = defaultCalendarBlocks(); state.todoTasks = []; state.goals = []; state.groceryItems = []; state.recipes = []; }
     state.loaded = true;
     render();
     initFirebase();
     refreshPushStatus();
   }
   function save(rerender){
-    try{ localStorage.setItem(STORAGE_KEY, JSON.stringify({ projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings, calendarBlocks: state.calendarBlocks, todoTasks: state.todoTasks, goals: state.goals })); }catch(e){}
+    try{ localStorage.setItem(STORAGE_KEY, JSON.stringify({ projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings, calendarBlocks: state.calendarBlocks, todoTasks: state.todoTasks, goals: state.goals, groceryItems: state.groceryItems, recipes: state.recipes })); }catch(e){}
     pushToCloud();
     if(rerender !== false) render();
   }
@@ -1001,7 +1068,7 @@
           <input type="file" id="import-file" accept="application/json" style="display:none" />
         </div>
         ${state.importPending ? `
-        <div class="sync-sub" style="color:var(--gold); margin-top:10px;">This will replace the data on this device with the imported file (${state.importPending.projects.length} project${state.importPending.projects.length===1?'':'s'}, ${state.importPending.budgets.length} budget${state.importPending.budgets.length===1?'':'s'}, ${state.importPending.savingsGoals.length} savings goal${state.importPending.savingsGoals.length===1?'':'s'}, ${state.importPending.earnings.length} earning${state.importPending.earnings.length===1?'':'s'}, ${state.importPending.calendarBlocks.length} calendar block${state.importPending.calendarBlocks.length===1?'':'s'}, ${state.importPending.todoTasks.length} to-do task${state.importPending.todoTasks.length===1?'':'s'}, ${state.importPending.goals.length} goal${state.importPending.goals.length===1?'':'s'}).</div>
+        <div class="sync-sub" style="color:var(--gold); margin-top:10px;">This will replace the data on this device with the imported file (${state.importPending.projects.length} project${state.importPending.projects.length===1?'':'s'}, ${state.importPending.budgets.length} budget${state.importPending.budgets.length===1?'':'s'}, ${state.importPending.savingsGoals.length} savings goal${state.importPending.savingsGoals.length===1?'':'s'}, ${state.importPending.earnings.length} earning${state.importPending.earnings.length===1?'':'s'}, ${state.importPending.calendarBlocks.length} calendar block${state.importPending.calendarBlocks.length===1?'':'s'}, ${state.importPending.todoTasks.length} to-do task${state.importPending.todoTasks.length===1?'':'s'}, ${state.importPending.goals.length} goal${state.importPending.goals.length===1?'':'s'}, ${state.importPending.groceryItems.length} grocery item${state.importPending.groceryItems.length===1?'':'s'}, ${state.importPending.recipes.length} recipe${state.importPending.recipes.length===1?'':'s'}).</div>
         <div class="sync-btn-row">
           <button class="sync-btn" id="import-confirm-btn">Replace with imported data</button>
           <button class="sync-btn secondary" id="import-cancel-btn">Cancel</button>
@@ -1393,6 +1460,145 @@
       </div>
       <div class="danger-zone">
         <button class="sync-btn danger" id="delete-goal-btn">${state.goalDeleteArmed ? 'Tap again to permanently delete' : 'Delete goal'}</button>
+      </div>`;
+  }
+
+  function renderGroceryRow(item){
+    return `
+      <div class="item-card" style="padding:11px 14px;">
+        <div class="row">
+          <button class="check ${item.done?'done':''}" data-toggle-grocery="${item.id}"></button>
+          <div class="txt ${item.done?'done':''}">${escapeHtml(item.text)}</div>
+          <div class="btn-row">
+            <button class="icon-btn" data-del-grocery="${item.id}">✕</button>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  function renderGroceriesTab(){
+    const sections = GROCERY_CATEGORIES.map(cat => {
+      const items = state.groceryItems.filter(i => i.category === cat.key);
+      const rows = items.map(renderGroceryRow).join('');
+      return `
+        <div class="section-title" style="font-size:15px; margin-top:20px; margin-bottom:8px;">${cat.label}</div>
+        ${rows || '<div class="empty" style="padding:4px 2px 10px;">Nothing here yet.</div>'}
+        <div class="add-row">
+          <input type="text" data-new-grocery-input="${cat.key}" placeholder="Add to ${cat.label.toLowerCase()}…" />
+          <button data-new-grocery-btn="${cat.key}">Add</button>
+        </div>`;
+    }).join('');
+    const hasChecked = state.groceryItems.some(i => i.done);
+    return `
+      <div class="section-title">Groceries</div>
+      <div class="section-sub">Check things off as you shop — recipe ingredients land here automatically.</div>
+      ${hasChecked ? `<button class="ghost-btn" id="clear-checked-groceries-btn" style="margin-bottom:4px;">Clear checked items</button>` : ''}
+      ${sections}`;
+  }
+
+  function renderRecipeCategoryCard(key){
+    const meta = RECIPE_CATEGORIES.find(c => c.key === key);
+    const count = state.recipes.filter(r => r.category === key).length;
+    return `<button class="item-card" style="display:block; width:100%; text-align:left; border-left-color:var(--coral);" data-open-recipe-category="${key}">
+      <div style="font-weight:600; font-size:15px;">${meta.label}</div>
+      <div class="proj-sub" style="margin-top:6px;">${count} recipe${count===1?'':'s'}</div>
+    </button>`;
+  }
+
+  function renderRecipesTab(){
+    return `
+      <div class="section-title">Cookbook</div>
+      <div class="section-sub">Pick a category to browse or add recipes.</div>
+      ${RECIPE_CATEGORIES.map(c => renderRecipeCategoryCard(c.key)).join('')}`;
+  }
+
+  function renderRecipeCategoryDetail(key){
+    const meta = RECIPE_CATEGORIES.find(c => c.key === key) || { label: 'Recipes' };
+    const recipes = state.recipes.filter(r => r.category === key);
+    const rows = recipes.map(r => `
+      <button class="item-card" style="display:block; width:100%; text-align:left; border-left-color:var(--coral);" data-open-recipe="${r.id}">
+        <div style="font-weight:600; font-size:14.5px;">${escapeHtml(r.title)}</div>
+        <div class="proj-sub" style="margin-top:6px;">${r.ingredients.length} ingredient${r.ingredients.length===1?'':'s'}</div>
+      </button>`).join('');
+
+    const addForm = state.addingRecipe ? `
+      <div class="card">
+        <div class="k">New ${meta.label} Recipe</div>
+        <input type="text" id="new-recipe-title" placeholder="Recipe title…" class="money-input" style="margin-bottom:12px;" />
+        <div class="sync-btn-row">
+          <button class="sync-btn" id="new-recipe-save">Add recipe</button>
+          <button class="sync-btn secondary" id="new-recipe-cancel">Cancel</button>
+        </div>
+      </div>` : `
+      <button class="card" id="add-recipe-btn" style="width:100%; text-align:center; color:var(--ink-soft); cursor:pointer;">
+        <div style="font-size:20px; font-family:var(--font-display); line-height:1;">+</div>
+        <div style="font-family:var(--font-display); font-weight:600; font-size:12.5px; margin-top:4px;">New recipe</div>
+      </button>`;
+
+    return `
+      <button class="back-link" id="back-btn">← Cookbook</button>
+      <div class="section-title">${meta.label}</div>
+      <div class="section-sub">Tap a recipe to see ingredients and instructions.</div>
+      ${recipes.length ? rows : '<div class="empty">No recipes here yet.</div>'}
+      ${addForm}`;
+  }
+
+  function buildRecipeAiPrompt(r){
+    const ingredientLines = r.ingredients.map(i => `- ${i.text}`).join('\n');
+    let msg = `I'm cooking a recipe called "${r.title}."\n\n`;
+    msg += `Ingredients:\n${ingredientLines || '(none listed yet)'}\n\n`;
+    if(r.instructions && r.instructions.trim()) msg += `Instructions:\n${r.instructions.trim()}\n\n`;
+    msg += `Can you give me a rough estimate of the total cost to buy these ingredients (in USD) and the approximate calories per serving? Approximate is fine — just flag your assumptions (like serving size and where I'm shopping).`;
+    return msg;
+  }
+
+  function renderIngredientRow(ing){
+    const catLabel = (GROCERY_CATEGORIES.find(c => c.key === ing.category) || {}).label || '';
+    return `
+      <div class="item-card" style="padding:11px 14px;">
+        <div class="row">
+          <div class="txt">${escapeHtml(ing.text)}</div>
+          <div class="btn-row">
+            <button class="icon-btn" data-del-ingredient="${ing.id}">✕</button>
+          </div>
+        </div>
+        <div style="margin-top:6px; font-size:10.5px; font-family:var(--font-mono); color:var(--ink-soft); text-transform:uppercase; letter-spacing:.04em;">${catLabel}</div>
+      </div>`;
+  }
+
+  function renderRecipeDetail(r){
+    const meta = RECIPE_CATEGORIES.find(c => c.key === r.category) || { label: 'Recipes' };
+    const ingredientOptions = GROCERY_CATEGORIES.map(c => `<option value="${c.key}" ${state.newIngredientCategory===c.key?'selected':''}>${c.label}</option>`).join('');
+    return `
+      <button class="back-link" id="back-btn">← ${meta.label}</button>
+      <div class="hero-card" style="display:block; border-left:4px solid var(--coral);">
+        <div class="hlabel">${escapeHtml(r.title)}</div>
+        <div class="hsub">${meta.label}</div>
+      </div>
+
+      <div class="card">
+        <button class="ai-btn" style="--cat-color:var(--forest); margin-bottom:8px;" id="use-recipe-btn">Use this recipe — add ingredients to Groceries</button>
+        <button class="ai-btn" style="--cat-color:var(--indigo);" id="estimate-recipe-btn">${icon('ai')} Estimate cost &amp; calories</button>
+        <div class="ai-hint">Opens a new Claude chat with the ingredients and instructions pre-filled.</div>
+        ${state.recipeUseStatus ? `<div class="sync-sub" style="color:var(--forest); margin-top:10px; text-align:center;">${escapeHtml(state.recipeUseStatus)}</div>` : ''}
+      </div>
+
+      <div class="section-title" style="font-size:16px;">Ingredients</div>
+      <div class="section-sub">Each one gets a grocery category so it lands in the right spot.</div>
+      ${r.ingredients.length ? r.ingredients.map(renderIngredientRow).join('') : '<div class="empty">No ingredients yet.</div>'}
+      <div class="add-row" style="flex-wrap:wrap;">
+        <input type="text" id="new-ingredient-text" placeholder="Ingredient (e.g. 2 cups flour)" style="flex:1 1 100%;" />
+        <select id="new-ingredient-category" class="money-input" style="flex:1;">${ingredientOptions}</select>
+        <button id="add-ingredient-btn">Add</button>
+      </div>
+
+      <div class="card" style="margin-top:20px;">
+        <div class="k">Instructions</div>
+        <textarea data-recipe-instructions placeholder="Step by step, however you'd write it for yourself.">${escapeHtml(r.instructions)}</textarea>
+      </div>
+
+      <div class="danger-zone">
+        <button class="sync-btn danger" id="delete-recipe-btn">${state.recipeDeleteArmed ? 'Tap again to permanently delete' : 'Delete recipe'}</button>
       </div>`;
   }
 
@@ -1807,6 +2013,12 @@
       const g = state.goals.find(x => x.id === state.activeGoal);
       if(!g){ state.view = 'tab'; state.tab = 'goals'; bodyHtml = renderGoalsTab(); }
       else bodyHtml = renderGoalDetail(g);
+    } else if(state.view === 'recipeCategory'){
+      bodyHtml = renderRecipeCategoryDetail(state.activeRecipeCategory);
+    } else if(state.view === 'recipe'){
+      const r = state.recipes.find(x => x.id === state.activeRecipe);
+      if(!r){ state.view = 'tab'; state.tab = 'cookbook'; bodyHtml = renderRecipesTab(); }
+      else bodyHtml = renderRecipeDetail(r);
     } else {
       if(state.tab === 'calendar') bodyHtml = renderCalendarTab();
       else if(state.tab === 'projects') bodyHtml = renderProjectsTab();
@@ -1814,8 +2026,8 @@
       else if(state.tab === 'school') bodyHtml = renderPlaceholderTab('School', 'Classes, assignments, and deadlines.');
       else if(state.tab === 'todo') bodyHtml = renderTodoTab();
       else if(state.tab === 'goals') bodyHtml = renderGoalsTab();
-      else if(state.tab === 'groceries') bodyHtml = renderPlaceholderTab('Groceries', 'Shopping list for whatever you need to pick up.');
-      else if(state.tab === 'cookbook') bodyHtml = renderPlaceholderTab('Cookbook', 'Recipes worth keeping around.');
+      else if(state.tab === 'groceries') bodyHtml = renderGroceriesTab();
+      else if(state.tab === 'cookbook') bodyHtml = renderRecipesTab();
       else if(state.tab === 'more') bodyHtml = renderMoreTab();
       else bodyHtml = renderHomeTab();
     }
@@ -1866,6 +2078,11 @@
         state.activeGoal = null;
         state.addingGoal = false;
         state.goalDeleteArmed = false;
+        state.activeRecipeCategory = null;
+        state.activeRecipe = null;
+        state.addingRecipe = false;
+        state.recipeDeleteArmed = false;
+        state.recipeUseStatus = '';
         render(); window.scrollTo(0,0);
       });
     });
@@ -1902,6 +2119,16 @@
         state.view = 'tab';
         state.activeGoalCategory = null;
         state.addingGoal = false;
+      } else if(state.view === 'recipe'){
+        // step back to the recipe category page this was opened from
+        state.view = 'recipeCategory';
+        state.activeRecipe = null;
+        state.recipeDeleteArmed = false;
+        state.recipeUseStatus = '';
+      } else if(state.view === 'recipeCategory'){
+        state.view = 'tab';
+        state.activeRecipeCategory = null;
+        state.addingRecipe = false;
       } else {
         state.view = 'tab';
         state.activeProject = null;
@@ -1949,6 +2176,8 @@
         state.calendarBlocks = state.importPending.calendarBlocks;
         state.todoTasks = state.importPending.todoTasks;
         state.goals = state.importPending.goals;
+        state.groceryItems = state.importPending.groceryItems;
+        state.recipes = state.importPending.recipes;
         state.importPending = null;
         state.importStatus = 'ok:Import complete.';
         save();
@@ -2490,6 +2719,131 @@
       return;
     }
 
+    if(state.view === 'tab' && state.tab === 'groceries'){
+      root.querySelectorAll('[data-toggle-grocery]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const id = btn.getAttribute('data-toggle-grocery');
+          const item = state.groceryItems.find(x => x.id === id);
+          if(item){ item.done = !item.done; save(); }
+        });
+      });
+      root.querySelectorAll('[data-del-grocery]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const id = btn.getAttribute('data-del-grocery');
+          state.groceryItems = state.groceryItems.filter(x => x.id !== id);
+          save();
+        });
+      });
+      root.querySelectorAll('[data-new-grocery-btn]').forEach(btn => {
+        const cat = btn.getAttribute('data-new-grocery-btn');
+        const input = root.querySelector(`[data-new-grocery-input="${cat}"]`);
+        const doAdd = () => {
+          const v = input.value.trim();
+          if(!v) return;
+          addGroceryItem(cat, v);
+        };
+        btn.addEventListener('click', doAdd);
+        input.addEventListener('keydown', e => { if(e.key === 'Enter') doAdd(); });
+      });
+      const clearBtn = root.querySelector('#clear-checked-groceries-btn');
+      if(clearBtn) clearBtn.addEventListener('click', () => {
+        state.groceryItems = state.groceryItems.filter(x => !x.done);
+        save();
+      });
+      return;
+    }
+
+    if(state.view === 'tab' && state.tab === 'cookbook'){
+      root.querySelectorAll('[data-open-recipe-category]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          state.activeRecipeCategory = btn.getAttribute('data-open-recipe-category');
+          state.view = 'recipeCategory';
+          render(); window.scrollTo(0,0);
+        });
+      });
+      return;
+    }
+
+    if(state.view === 'recipeCategory'){
+      root.querySelectorAll('[data-open-recipe]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          state.activeRecipe = btn.getAttribute('data-open-recipe');
+          state.view = 'recipe';
+          state.recipeDeleteArmed = false;
+          state.recipeUseStatus = '';
+          render(); window.scrollTo(0,0);
+        });
+      });
+      if(state.addingRecipe){
+        const titleInput = root.querySelector('#new-recipe-title');
+        const saveBtn = root.querySelector('#new-recipe-save');
+        const cancelBtn = root.querySelector('#new-recipe-cancel');
+        if(titleInput) titleInput.focus();
+        const doSave = () => {
+          const title = titleInput.value.trim();
+          if(!title) return;
+          addRecipe(title, state.activeRecipeCategory);
+        };
+        saveBtn.addEventListener('click', doSave);
+        cancelBtn.addEventListener('click', () => { state.addingRecipe = false; render(); });
+        titleInput.addEventListener('keydown', e => { if(e.key === 'Enter') doSave(); });
+      } else {
+        const addBtn = root.querySelector('#add-recipe-btn');
+        if(addBtn) addBtn.addEventListener('click', () => { state.addingRecipe = true; render(); });
+      }
+      return;
+    }
+
+    if(state.view === 'recipe'){
+      const r = state.recipes.find(x => x.id === state.activeRecipe);
+      if(!r) return;
+
+      root.querySelector('[data-recipe-instructions]').addEventListener('blur', e => { r.instructions = e.target.value; save(); });
+
+      root.querySelector('#use-recipe-btn').addEventListener('click', () => { useRecipe(r); });
+
+      root.querySelector('#estimate-recipe-btn').addEventListener('click', () => {
+        const url = 'https://claude.ai/new?q=' + encodeURIComponent(buildRecipeAiPrompt(r));
+        window.open(url, '_blank', 'noopener');
+      });
+
+      root.querySelectorAll('[data-del-ingredient]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const id = btn.getAttribute('data-del-ingredient');
+          r.ingredients = r.ingredients.filter(x => x.id !== id);
+          save();
+        });
+      });
+
+      const ingredientText = root.querySelector('#new-ingredient-text');
+      const ingredientCategory = root.querySelector('#new-ingredient-category');
+      const addIngredientBtn = root.querySelector('#add-ingredient-btn');
+      const doAddIngredient = () => {
+        const text = ingredientText.value.trim();
+        if(!text) return;
+        state.newIngredientCategory = ingredientCategory.value;
+        r.ingredients.push({ id: makeId(), text, category: validGroceryCategory(ingredientCategory.value) });
+        save();
+      };
+      addIngredientBtn.addEventListener('click', doAddIngredient);
+      ingredientText.addEventListener('keydown', e => { if(e.key === 'Enter') doAddIngredient(); });
+      ingredientCategory.addEventListener('change', () => { state.newIngredientCategory = ingredientCategory.value; });
+
+      root.querySelector('#delete-recipe-btn').addEventListener('click', () => {
+        if(!state.recipeDeleteArmed){
+          state.recipeDeleteArmed = true;
+          render();
+          return;
+        }
+        state.recipes = state.recipes.filter(x => x.id !== r.id);
+        state.view = 'recipeCategory';
+        state.activeRecipe = null;
+        state.recipeDeleteArmed = false;
+        save();
+      });
+      return;
+    }
+
     if(state.view === 'project'){
       const p = state.projects.find(x => x.id === state.activeProject);
       if(!p) return;
@@ -2630,8 +2984,32 @@
     save();
   }
 
+  function addGroceryItem(category, text){
+    state.groceryItems.push({ id: makeId(), category: validGroceryCategory(category), text: text.trim(), done: false, fromRecipe: null });
+    save();
+  }
+
+  function addRecipe(title, category){
+    const newR = { id: makeId(), category, title: title.trim(), ingredients: [], instructions: '' };
+    state.recipes.push(newR);
+    state.activeRecipe = newR.id;
+    state.view = 'recipe';
+    state.addingRecipe = false;
+    save();
+  }
+
+  function useRecipe(r){
+    r.ingredients.forEach(ing => {
+      state.groceryItems.push({ id: makeId(), category: ing.category, text: ing.text, done: false, fromRecipe: r.id });
+    });
+    state.recipeUseStatus = r.ingredients.length
+      ? `Added ${r.ingredients.length} ingredient${r.ingredients.length===1?'':'s'} to your grocery list.`
+      : 'This recipe has no ingredients yet.';
+    save();
+  }
+
   function exportData(){
-    const payload = { app: 'project-hub', version: 1, exportedAt: new Date().toISOString(), projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings, calendarBlocks: state.calendarBlocks, todoTasks: state.todoTasks, goals: state.goals };
+    const payload = { app: 'project-hub', version: 1, exportedAt: new Date().toISOString(), projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings, calendarBlocks: state.calendarBlocks, todoTasks: state.todoTasks, goals: state.goals, groceryItems: state.groceryItems, recipes: state.recipes };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -2657,7 +3035,9 @@
           earnings: normalizeEarnings(parsed && parsed.earnings),
           calendarBlocks: normalizeCalendarBlocks(parsed && parsed.calendarBlocks),
           todoTasks: normalizeTodoTasks(parsed && parsed.todoTasks),
-          goals: normalizeGoals(parsed && parsed.goals)
+          goals: normalizeGoals(parsed && parsed.goals),
+          groceryItems: normalizeGroceryItems(parsed && parsed.groceryItems),
+          recipes: normalizeRecipes(parsed && parsed.recipes)
         };
         state.importStatus = '';
         render();
