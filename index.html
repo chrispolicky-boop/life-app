@@ -1062,7 +1062,7 @@
       const durMin = Math.max(20, timeToMinutes(b.end) - timeToMinutes(b.start));
       const top = Math.max(0, startMin / 60 * CAL_PX_PER_HOUR);
       const height = Math.max(26, durMin / 60 * CAL_PX_PER_HOUR - 2);
-      return `<button data-open-block="${b.id}" style="position:absolute; top:${top}px; left:48px; right:2px; height:${height}px; background:${color}26; border-left:4px solid ${color}; border-radius:8px; padding:5px 8px; text-align:left; overflow:hidden;">
+      return `<button data-open-block="${b.id}" style="position:absolute; top:${top}px; left:48px; right:2px; height:${height}px; background:${color}26; border-left:4px solid ${color}; border-radius:8px; padding:5px 8px; text-align:left; overflow:hidden; user-select:none; -webkit-user-select:none; -webkit-user-drag:none;">
         <div style="display:flex; align-items:center; gap:5px; font-weight:600; font-size:12px; color:var(--ink);">
           <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(b.title)}</span>
           ${b.recurring ? '<span style="flex-shrink:0; width:11px; height:11px; color:var(--ink-soft);">' + icon('sync') + '</span>' : ''}
@@ -1070,7 +1070,7 @@
         <div style="font-family:var(--font-mono); font-size:9.5px; color:var(--ink-soft);">${fmtTime(b.start)} – ${fmtTime(b.end)}</div>
       </button>`;
     }).join('');
-    return `<div style="position:relative; height:${totalHeight}px; margin-bottom:16px;">${hourLines.join('')}${blockEls}</div>`;
+    return `<div style="position:relative; height:${totalHeight}px; margin-bottom:16px; user-select:none; -webkit-user-select:none;">${hourLines.join('')}${blockEls}</div>`;
   }
 
   function renderTypePicker(group, selectedKey){
@@ -2260,6 +2260,7 @@
           }
           if(Math.abs(dy) > DRAG_START_PX) moved = true;
           if(!moved) return;
+          e.preventDefault();
           const newTop = Math.min(Math.max(0, startTop + dy), maxTop);
           el.style.top = newTop + 'px';
         });
