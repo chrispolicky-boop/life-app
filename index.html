@@ -314,6 +314,10 @@
     { key: 'intellectual', label: 'Intellectual', color: '#3EBBA9' },
     { key: 'emotional', label: 'Emotional', color: '#EA7EB0' }
   ];
+  const GOAL_PEOPLE = [
+    { key: 'chris', label: 'Chris' },
+    { key: 'kelsey', label: 'Kelsey' }
+  ];
   function goalCategoryColor(key){
     const c = GOAL_CATEGORIES.find(x => x.key === key);
     return c ? c.color : GOAL_CATEGORIES[0].color;
@@ -321,8 +325,10 @@
   function normalizeGoal(g){
     g = g || {};
     const validCategory = GOAL_CATEGORIES.some(c => c.key === g.category) ? g.category : 'physical';
+    const validPerson = GOAL_PEOPLE.some(p => p.key === g.person) ? g.person : 'chris';
     return {
       id: g.id || makeId(),
+      person: validPerson,
       category: validCategory,
       name: g.name || 'Untitled goal',
       plan: g.plan || ''
@@ -815,6 +821,7 @@
     addingTodoTask: false,
     newTodoPriority: 2,
     goals: [],
+    activeGoalPerson: null,
     activeGoalCategory: null,
     activeGoal: null,
     addingGoal: false,
@@ -1422,10 +1429,10 @@
       ${tasks.length ? tasks.map(t => renderTodoRow(t, true)).join('') : '<div class="empty">Nothing due in this window.</div>'}`;
   }
 
-  function renderGoalCategoryCard(key){
-    const meta = GOAL_CATEGORIES.find(c => c.key === key);
-    const count = state.goals.filter(g => g.category === key).length;
-    return `<button class="item-card" style="display:block; width:100%; text-align:left; border-left-color:${meta.color};" data-open-goal-category="${key}">
+  function renderGoalPersonCard(personKey){
+    const meta = GOAL_PEOPLE.find(p => p.key === personKey);
+    const count = state.goals.filter(g => g.person === personKey).length;
+    return `<button class="item-card" style="display:block; width:100%; text-align:left; border-left-color:var(--indigo);" data-open-goal-person="${personKey}">
       <div style="font-weight:600; font-size:15px;">${meta.label}</div>
       <div class="proj-sub" style="margin-top:6px;">${count} goal${count===1?'':'s'}</div>
     </button>`;
@@ -1434,13 +1441,32 @@
   function renderGoalsTab(){
     return `
       <div class="section-title">Goals</div>
+      <div class="section-sub">Whose goals are we looking at?</div>
+      ${GOAL_PEOPLE.map(p => renderGoalPersonCard(p.key)).join('')}`;
+  }
+
+  function renderGoalCategoryCard(personKey, key){
+    const meta = GOAL_CATEGORIES.find(c => c.key === key);
+    const count = state.goals.filter(g => g.person === personKey && g.category === key).length;
+    return `<button class="item-card" style="display:block; width:100%; text-align:left; border-left-color:${meta.color};" data-open-goal-category="${key}">
+      <div style="font-weight:600; font-size:15px;">${meta.label}</div>
+      <div class="proj-sub" style="margin-top:6px;">${count} goal${count===1?'':'s'}</div>
+    </button>`;
+  }
+
+  function renderGoalPersonDetail(personKey){
+    const meta = GOAL_PEOPLE.find(p => p.key === personKey) || { label: 'Goals' };
+    return `
+      <button class="back-link" id="back-btn">← Goals</button>
+      <div class="section-title">${meta.label}'s Goals</div>
       <div class="section-sub">Pick an area to see or add goals — each one gets its own plan.</div>
-      ${GOAL_CATEGORIES.map(c => renderGoalCategoryCard(c.key)).join('')}`;
+      ${GOAL_CATEGORIES.map(c => renderGoalCategoryCard(personKey, c.key)).join('')}`;
   }
 
   function renderGoalCategoryDetail(key){
+    const personMeta = GOAL_PEOPLE.find(p => p.key === state.activeGoalPerson) || { label: 'Goals' };
     const meta = GOAL_CATEGORIES.find(c => c.key === key) || { label: 'Goals', color: COLORS[0] };
-    const goals = state.goals.filter(g => g.category === key);
+    const goals = state.goals.filter(g => g.category === key && g.person === state.activeGoalPerson);
     const rows = goals.map(g => `
       <button class="item-card" style="display:block; width:100%; text-align:left; border-left-color:${meta.color};" data-open-goal="${g.id}">
         <div style="font-weight:600; font-size:14.5px;">${escapeHtml(g.name)}</div>
@@ -1462,7 +1488,7 @@
       </button>`;
 
     return `
-      <button class="back-link" id="back-btn">← Goals</button>
+      <button class="back-link" id="back-btn">← ${personMeta.label}</button>
       <div class="section-title">${meta.label}</div>
       <div class="section-sub">Tap a goal to write out the plan behind it.</div>
       ${goals.length ? rows : '<div class="empty">No goals here yet.</div>'}
@@ -1470,12 +1496,13 @@
   }
 
   function renderGoalDetail(g){
+    const personMeta = GOAL_PEOPLE.find(p => p.key === g.person) || { label: '' };
     const meta = GOAL_CATEGORIES.find(c => c.key === g.category) || { label: 'Goals', color: COLORS[0] };
     return `
       <button class="back-link" id="back-btn">← ${meta.label}</button>
       <div class="hero-card" style="display:block; border-left:4px solid ${meta.color};">
         <div class="hlabel">${escapeHtml(g.name)}</div>
-        <div class="hsub">${meta.label}</div>
+        <div class="hsub">${personMeta.label} · ${meta.label}</div>
       </div>
       <div class="card" style="--cat-color:${meta.color}">
         <div class="k">Plan</div>
@@ -2177,6 +2204,8 @@
       bodyHtml = renderTodoCategoryDetail(state.todoCategory);
     } else if(state.view === 'todoTimeView'){
       bodyHtml = renderTodoTimeViewDetail(state.todoTimeView);
+    } else if(state.view === 'goalPerson'){
+      bodyHtml = renderGoalPersonDetail(state.activeGoalPerson);
     } else if(state.view === 'goalCategory'){
       bodyHtml = renderGoalCategoryDetail(state.activeGoalCategory);
     } else if(state.view === 'goal'){
@@ -2246,6 +2275,7 @@
         state.todoCategory = null;
         state.todoTimeView = null;
         state.addingTodoTask = false;
+        state.activeGoalPerson = null;
         state.activeGoalCategory = null;
         state.activeGoal = null;
         state.addingGoal = false;
@@ -2293,9 +2323,13 @@
         state.activeGoal = null;
         state.goalDeleteArmed = false;
       } else if(state.view === 'goalCategory'){
-        state.view = 'tab';
+        // step back to the goal person page this was opened from
+        state.view = 'goalPerson';
         state.activeGoalCategory = null;
         state.addingGoal = false;
+      } else if(state.view === 'goalPerson'){
+        state.view = 'tab';
+        state.activeGoalPerson = null;
       } else if(state.view === 'recipe'){
         // step back to the recipe category page this was opened from
         state.view = 'recipeCategory';
@@ -2847,6 +2881,17 @@
     }
 
     if(state.view === 'tab' && state.tab === 'goals'){
+      root.querySelectorAll('[data-open-goal-person]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          state.activeGoalPerson = btn.getAttribute('data-open-goal-person');
+          state.view = 'goalPerson';
+          render(); window.scrollTo(0,0);
+        });
+      });
+      return;
+    }
+
+    if(state.view === 'goalPerson'){
       root.querySelectorAll('[data-open-goal-category]').forEach(btn => {
         btn.addEventListener('click', () => {
           state.activeGoalCategory = btn.getAttribute('data-open-goal-category');
@@ -3257,7 +3302,7 @@
   }
 
   function addGoal(name, category){
-    const newG = { id: makeId(), category, name: name.trim(), plan: '' };
+    const newG = { id: makeId(), person: state.activeGoalPerson, category, name: name.trim(), plan: '' };
     state.goals.push(newG);
     state.activeGoal = newG.id;
     state.view = 'goal';
