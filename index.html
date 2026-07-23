@@ -308,6 +308,28 @@
   }
   function normalizeProjects(list){ return asArray(list).map(normalizeProject); }
 
+  const GOAL_CATEGORIES = [
+    { key: 'physical', label: 'Physical', color: '#F2836E' },
+    { key: 'spiritual', label: 'Spiritual', color: '#7C81F5' },
+    { key: 'intellectual', label: 'Intellectual', color: '#3EBBA9' },
+    { key: 'emotional', label: 'Emotional', color: '#EA7EB0' }
+  ];
+  function goalCategoryColor(key){
+    const c = GOAL_CATEGORIES.find(x => x.key === key);
+    return c ? c.color : GOAL_CATEGORIES[0].color;
+  }
+  function normalizeGoal(g){
+    g = g || {};
+    const validCategory = GOAL_CATEGORIES.some(c => c.key === g.category) ? g.category : 'physical';
+    return {
+      id: g.id || makeId(),
+      category: validCategory,
+      name: g.name || 'Untitled goal',
+      plan: g.plan || ''
+    };
+  }
+  function normalizeGoals(list){ return asArray(list).map(normalizeGoal); }
+
   const BUDGET_PERIODS = [
     { key: 'weekly', label: 'Weekly' },
     { key: 'monthly', label: 'Monthly' },
@@ -728,6 +750,11 @@
     todoTimeView: null,
     addingTodoTask: false,
     newTodoPriority: 2,
+    goals: [],
+    activeGoalCategory: null,
+    activeGoal: null,
+    addingGoal: false,
+    goalDeleteArmed: false,
     importPending: null,
     importStatus: '',
     sync: { status: 'connecting', lastSynced: null }
@@ -780,8 +807,8 @@
     fbDb.ref(SYNC_PATH).on('value', snap => {
       const val = snap.val();
       if(!val || !val.projects){ render(); return; }
-      const incomingStr = JSON.stringify({ projects: val.projects, budgets: val.budgets, savingsGoals: val.savingsGoals, earnings: val.earnings, calendarBlocks: val.calendarBlocks, todoTasks: val.todoTasks });
-      if(incomingStr === JSON.stringify({ projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings, calendarBlocks: state.calendarBlocks, todoTasks: state.todoTasks })){
+      const incomingStr = JSON.stringify({ projects: val.projects, budgets: val.budgets, savingsGoals: val.savingsGoals, earnings: val.earnings, calendarBlocks: val.calendarBlocks, todoTasks: val.todoTasks, goals: val.goals });
+      if(incomingStr === JSON.stringify({ projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings, calendarBlocks: state.calendarBlocks, todoTasks: state.todoTasks, goals: state.goals })){
         state.sync.lastSynced = val.updatedAt || new Date().toISOString();
         render();
         return;
@@ -796,8 +823,9 @@
       state.earnings = normalizeEarnings(val.earnings);
       state.calendarBlocks = normalizeCalendarBlocks(val.calendarBlocks);
       state.todoTasks = normalizeTodoTasks(val.todoTasks);
+      state.goals = normalizeGoals(val.goals);
       state.sync.lastSynced = val.updatedAt || new Date().toISOString();
-      try{ localStorage.setItem(STORAGE_KEY, JSON.stringify({ projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings, calendarBlocks: state.calendarBlocks, todoTasks: state.todoTasks })); }catch(e){}
+      try{ localStorage.setItem(STORAGE_KEY, JSON.stringify({ projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings, calendarBlocks: state.calendarBlocks, todoTasks: state.todoTasks, goals: state.goals })); }catch(e){}
       render();
     }, () => {
       state.sync.status = 'error';
@@ -807,7 +835,7 @@
 
   function pushToCloud(){
     if(!fbDb || !state.user) return;
-    const payload = { projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings, calendarBlocks: state.calendarBlocks, todoTasks: state.todoTasks, updatedAt: new Date().toISOString() };
+    const payload = { projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings, calendarBlocks: state.calendarBlocks, todoTasks: state.todoTasks, goals: state.goals, updatedAt: new Date().toISOString() };
     fbDb.ref(SYNC_PATH).set(payload).then(() => {
       state.sync.lastSynced = payload.updatedAt;
     }).catch(() => {
@@ -828,6 +856,7 @@
         state.earnings = [];
         state.calendarBlocks = defaultCalendarBlocks();
         state.todoTasks = [];
+        state.goals = [];
       } else if(parsed){
         state.projects = normalizeProjects(parsed.projects);
         state.budgets = normalizeBudgets(parsed.budgets);
@@ -835,6 +864,7 @@
         state.earnings = normalizeEarnings(parsed.earnings);
         state.calendarBlocks = parsed.calendarBlocks ? normalizeCalendarBlocks(parsed.calendarBlocks) : defaultCalendarBlocks();
         state.todoTasks = normalizeTodoTasks(parsed.todoTasks);
+        state.goals = normalizeGoals(parsed.goals);
       } else {
         state.projects = defaultData();
         state.budgets = [];
@@ -842,15 +872,16 @@
         state.earnings = [];
         state.calendarBlocks = defaultCalendarBlocks();
         state.todoTasks = [];
+        state.goals = [];
       }
-    }catch(e){ state.projects = defaultData(); state.budgets = []; state.savingsGoals = []; state.earnings = []; state.calendarBlocks = defaultCalendarBlocks(); state.todoTasks = []; }
+    }catch(e){ state.projects = defaultData(); state.budgets = []; state.savingsGoals = []; state.earnings = []; state.calendarBlocks = defaultCalendarBlocks(); state.todoTasks = []; state.goals = []; }
     state.loaded = true;
     render();
     initFirebase();
     refreshPushStatus();
   }
   function save(rerender){
-    try{ localStorage.setItem(STORAGE_KEY, JSON.stringify({ projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings, calendarBlocks: state.calendarBlocks, todoTasks: state.todoTasks })); }catch(e){}
+    try{ localStorage.setItem(STORAGE_KEY, JSON.stringify({ projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings, calendarBlocks: state.calendarBlocks, todoTasks: state.todoTasks, goals: state.goals })); }catch(e){}
     pushToCloud();
     if(rerender !== false) render();
   }
@@ -970,7 +1001,7 @@
           <input type="file" id="import-file" accept="application/json" style="display:none" />
         </div>
         ${state.importPending ? `
-        <div class="sync-sub" style="color:var(--gold); margin-top:10px;">This will replace the data on this device with the imported file (${state.importPending.projects.length} project${state.importPending.projects.length===1?'':'s'}, ${state.importPending.budgets.length} budget${state.importPending.budgets.length===1?'':'s'}, ${state.importPending.savingsGoals.length} savings goal${state.importPending.savingsGoals.length===1?'':'s'}, ${state.importPending.earnings.length} earning${state.importPending.earnings.length===1?'':'s'}, ${state.importPending.calendarBlocks.length} calendar block${state.importPending.calendarBlocks.length===1?'':'s'}, ${state.importPending.todoTasks.length} to-do task${state.importPending.todoTasks.length===1?'':'s'}).</div>
+        <div class="sync-sub" style="color:var(--gold); margin-top:10px;">This will replace the data on this device with the imported file (${state.importPending.projects.length} project${state.importPending.projects.length===1?'':'s'}, ${state.importPending.budgets.length} budget${state.importPending.budgets.length===1?'':'s'}, ${state.importPending.savingsGoals.length} savings goal${state.importPending.savingsGoals.length===1?'':'s'}, ${state.importPending.earnings.length} earning${state.importPending.earnings.length===1?'':'s'}, ${state.importPending.calendarBlocks.length} calendar block${state.importPending.calendarBlocks.length===1?'':'s'}, ${state.importPending.todoTasks.length} to-do task${state.importPending.todoTasks.length===1?'':'s'}, ${state.importPending.goals.length} goal${state.importPending.goals.length===1?'':'s'}).</div>
         <div class="sync-btn-row">
           <button class="sync-btn" id="import-confirm-btn">Replace with imported data</button>
           <button class="sync-btn secondary" id="import-cancel-btn">Cancel</button>
@@ -1299,6 +1330,70 @@
       <div class="section-title">${label}</div>
       <div class="section-sub">Everything due in this window, across both lists.</div>
       ${tasks.length ? tasks.map(t => renderTodoRow(t, true)).join('') : '<div class="empty">Nothing due in this window.</div>'}`;
+  }
+
+  function renderGoalCategoryCard(key){
+    const meta = GOAL_CATEGORIES.find(c => c.key === key);
+    const count = state.goals.filter(g => g.category === key).length;
+    return `<button class="item-card" style="display:block; width:100%; text-align:left; border-left-color:${meta.color};" data-open-goal-category="${key}">
+      <div style="font-weight:600; font-size:15px;">${meta.label}</div>
+      <div class="proj-sub" style="margin-top:6px;">${count} goal${count===1?'':'s'}</div>
+    </button>`;
+  }
+
+  function renderGoalsTab(){
+    return `
+      <div class="section-title">Goals</div>
+      <div class="section-sub">Pick an area to see or add goals — each one gets its own plan.</div>
+      ${GOAL_CATEGORIES.map(c => renderGoalCategoryCard(c.key)).join('')}`;
+  }
+
+  function renderGoalCategoryDetail(key){
+    const meta = GOAL_CATEGORIES.find(c => c.key === key) || { label: 'Goals', color: COLORS[0] };
+    const goals = state.goals.filter(g => g.category === key);
+    const rows = goals.map(g => `
+      <button class="item-card" style="display:block; width:100%; text-align:left; border-left-color:${meta.color};" data-open-goal="${g.id}">
+        <div style="font-weight:600; font-size:14.5px;">${escapeHtml(g.name)}</div>
+        ${g.plan ? `<div class="proj-sub" style="margin-top:6px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(g.plan)}</div>` : `<div class="proj-sub" style="margin-top:6px; font-style:italic;">No plan yet</div>`}
+      </button>`).join('');
+
+    const addForm = state.addingGoal ? `
+      <div class="card">
+        <div class="k">New ${meta.label} Goal</div>
+        <input type="text" id="new-goal-name" placeholder="Goal name…" class="money-input" style="margin-bottom:12px;" />
+        <div class="sync-btn-row">
+          <button class="sync-btn" id="new-goal-save">Add goal</button>
+          <button class="sync-btn secondary" id="new-goal-cancel">Cancel</button>
+        </div>
+      </div>` : `
+      <button class="card" id="add-goal-btn" style="width:100%; text-align:center; color:var(--ink-soft); cursor:pointer;">
+        <div style="font-size:20px; font-family:var(--font-display); line-height:1;">+</div>
+        <div style="font-family:var(--font-display); font-weight:600; font-size:12.5px; margin-top:4px;">New goal</div>
+      </button>`;
+
+    return `
+      <button class="back-link" id="back-btn">← Goals</button>
+      <div class="section-title">${meta.label}</div>
+      <div class="section-sub">Tap a goal to write out the plan behind it.</div>
+      ${goals.length ? rows : '<div class="empty">No goals here yet.</div>'}
+      ${addForm}`;
+  }
+
+  function renderGoalDetail(g){
+    const meta = GOAL_CATEGORIES.find(c => c.key === g.category) || { label: 'Goals', color: COLORS[0] };
+    return `
+      <button class="back-link" id="back-btn">← ${meta.label}</button>
+      <div class="hero-card" style="display:block; border-left:4px solid ${meta.color};">
+        <div class="hlabel">${escapeHtml(g.name)}</div>
+        <div class="hsub">${meta.label}</div>
+      </div>
+      <div class="card" style="--cat-color:${meta.color}">
+        <div class="k">Plan</div>
+        <textarea data-goal-plan placeholder="What's the plan to make this happen?">${escapeHtml(g.plan)}</textarea>
+      </div>
+      <div class="danger-zone">
+        <button class="sync-btn danger" id="delete-goal-btn">${state.goalDeleteArmed ? 'Tap again to permanently delete' : 'Delete goal'}</button>
+      </div>`;
   }
 
   function renderBudgetListBody(periodKey, label){
@@ -1706,13 +1801,19 @@
       bodyHtml = renderTodoCategoryDetail(state.todoCategory);
     } else if(state.view === 'todoTimeView'){
       bodyHtml = renderTodoTimeViewDetail(state.todoTimeView);
+    } else if(state.view === 'goalCategory'){
+      bodyHtml = renderGoalCategoryDetail(state.activeGoalCategory);
+    } else if(state.view === 'goal'){
+      const g = state.goals.find(x => x.id === state.activeGoal);
+      if(!g){ state.view = 'tab'; state.tab = 'goals'; bodyHtml = renderGoalsTab(); }
+      else bodyHtml = renderGoalDetail(g);
     } else {
       if(state.tab === 'calendar') bodyHtml = renderCalendarTab();
       else if(state.tab === 'projects') bodyHtml = renderProjectsTab();
       else if(state.tab === 'finance') bodyHtml = renderFinanceTab();
       else if(state.tab === 'school') bodyHtml = renderPlaceholderTab('School', 'Classes, assignments, and deadlines.');
       else if(state.tab === 'todo') bodyHtml = renderTodoTab();
-      else if(state.tab === 'goals') bodyHtml = renderPlaceholderTab('Goals', 'Personal goals and habits you want to build.');
+      else if(state.tab === 'goals') bodyHtml = renderGoalsTab();
       else if(state.tab === 'groceries') bodyHtml = renderPlaceholderTab('Groceries', 'Shopping list for whatever you need to pick up.');
       else if(state.tab === 'cookbook') bodyHtml = renderPlaceholderTab('Cookbook', 'Recipes worth keeping around.');
       else if(state.tab === 'more') bodyHtml = renderMoreTab();
@@ -1761,6 +1862,10 @@
         state.todoCategory = null;
         state.todoTimeView = null;
         state.addingTodoTask = false;
+        state.activeGoalCategory = null;
+        state.activeGoal = null;
+        state.addingGoal = false;
+        state.goalDeleteArmed = false;
         render(); window.scrollTo(0,0);
       });
     });
@@ -1788,6 +1893,15 @@
         state.todoCategory = null;
         state.todoTimeView = null;
         state.addingTodoTask = false;
+      } else if(state.view === 'goal'){
+        // step back to the goal category page this was opened from
+        state.view = 'goalCategory';
+        state.activeGoal = null;
+        state.goalDeleteArmed = false;
+      } else if(state.view === 'goalCategory'){
+        state.view = 'tab';
+        state.activeGoalCategory = null;
+        state.addingGoal = false;
       } else {
         state.view = 'tab';
         state.activeProject = null;
@@ -1834,6 +1948,7 @@
         state.earnings = state.importPending.earnings;
         state.calendarBlocks = state.importPending.calendarBlocks;
         state.todoTasks = state.importPending.todoTasks;
+        state.goals = state.importPending.goals;
         state.importPending = null;
         state.importStatus = 'ok:Import complete.';
         save();
@@ -2313,6 +2428,67 @@
       return;
     }
 
+    if(state.view === 'tab' && state.tab === 'goals'){
+      root.querySelectorAll('[data-open-goal-category]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          state.activeGoalCategory = btn.getAttribute('data-open-goal-category');
+          state.view = 'goalCategory';
+          render(); window.scrollTo(0,0);
+        });
+      });
+      return;
+    }
+
+    if(state.view === 'goalCategory'){
+      root.querySelectorAll('[data-open-goal]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          state.activeGoal = btn.getAttribute('data-open-goal');
+          state.view = 'goal';
+          state.goalDeleteArmed = false;
+          render(); window.scrollTo(0,0);
+        });
+      });
+      if(state.addingGoal){
+        const nameInput = root.querySelector('#new-goal-name');
+        const saveBtn = root.querySelector('#new-goal-save');
+        const cancelBtn = root.querySelector('#new-goal-cancel');
+        if(nameInput) nameInput.focus();
+        const doSave = () => {
+          const name = nameInput.value.trim();
+          if(!name) return;
+          addGoal(name, state.activeGoalCategory);
+        };
+        saveBtn.addEventListener('click', doSave);
+        cancelBtn.addEventListener('click', () => { state.addingGoal = false; render(); });
+        nameInput.addEventListener('keydown', e => { if(e.key === 'Enter') doSave(); });
+      } else {
+        const addBtn = root.querySelector('#add-goal-btn');
+        if(addBtn) addBtn.addEventListener('click', () => { state.addingGoal = true; render(); });
+      }
+      return;
+    }
+
+    if(state.view === 'goal'){
+      const g = state.goals.find(x => x.id === state.activeGoal);
+      if(!g) return;
+
+      root.querySelector('[data-goal-plan]').addEventListener('blur', e => { g.plan = e.target.value; save(); });
+
+      root.querySelector('#delete-goal-btn').addEventListener('click', () => {
+        if(!state.goalDeleteArmed){
+          state.goalDeleteArmed = true;
+          render();
+          return;
+        }
+        state.goals = state.goals.filter(x => x.id !== g.id);
+        state.view = 'goalCategory';
+        state.activeGoal = null;
+        state.goalDeleteArmed = false;
+        save();
+      });
+      return;
+    }
+
     if(state.view === 'project'){
       const p = state.projects.find(x => x.id === state.activeProject);
       if(!p) return;
@@ -2444,8 +2620,17 @@
     save();
   }
 
+  function addGoal(name, category){
+    const newG = { id: makeId(), category, name: name.trim(), plan: '' };
+    state.goals.push(newG);
+    state.activeGoal = newG.id;
+    state.view = 'goal';
+    state.addingGoal = false;
+    save();
+  }
+
   function exportData(){
-    const payload = { app: 'project-hub', version: 1, exportedAt: new Date().toISOString(), projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings, calendarBlocks: state.calendarBlocks, todoTasks: state.todoTasks };
+    const payload = { app: 'project-hub', version: 1, exportedAt: new Date().toISOString(), projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings, calendarBlocks: state.calendarBlocks, todoTasks: state.todoTasks, goals: state.goals };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -2470,7 +2655,8 @@
           savingsGoals: normalizeSavingsGoals(parsed && parsed.savingsGoals),
           earnings: normalizeEarnings(parsed && parsed.earnings),
           calendarBlocks: normalizeCalendarBlocks(parsed && parsed.calendarBlocks),
-          todoTasks: normalizeTodoTasks(parsed && parsed.todoTasks)
+          todoTasks: normalizeTodoTasks(parsed && parsed.todoTasks),
+          goals: normalizeGoals(parsed && parsed.goals)
         };
         state.importStatus = '';
         render();
