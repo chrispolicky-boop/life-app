@@ -808,6 +808,7 @@
     addingGoal: false,
     goalDeleteArmed: false,
     groceryItems: [],
+    groceryView: 'active',
     recipes: [],
     activeRecipeCategory: null,
     activeRecipe: null,
@@ -1468,8 +1469,18 @@
     return `
       <div class="item-card" style="padding:11px 14px;">
         <div class="row">
-          <button class="check ${item.done?'done':''}" data-toggle-grocery="${item.id}"></button>
-          <div class="txt ${item.done?'done':''}">${escapeHtml(item.text)}</div>
+          <button class="check" data-toggle-grocery="${item.id}"></button>
+          <div class="txt">${escapeHtml(item.text)}</div>
+        </div>
+      </div>`;
+  }
+
+  function renderCrossedGroceryRow(item){
+    return `
+      <div class="item-card" style="padding:11px 14px; opacity:0.6;">
+        <div class="row">
+          <button class="check done" data-toggle-grocery="${item.id}" title="Restore to active list"></button>
+          <div class="txt done">${escapeHtml(item.text)}</div>
           <div class="btn-row">
             <button class="icon-btn" data-del-grocery="${item.id}">✕</button>
           </div>
@@ -1477,9 +1488,34 @@
       </div>`;
   }
 
+  function renderGroceryViewToggle(view){
+    return `<div style="display:flex; gap:8px; margin-bottom:18px;">
+      <button data-grocery-view="active" class="ghost-btn" style="flex:1; ${view==='active' ? 'background:var(--teal); color:#fff; border-color:var(--teal);' : ''}">Active</button>
+      <button data-grocery-view="crossedOut" class="ghost-btn" style="flex:1; ${view==='crossedOut' ? 'background:var(--teal); color:#fff; border-color:var(--teal);' : ''}">Crossed Out</button>
+    </div>`;
+  }
+
   function renderGroceriesTab(){
+    const view = state.groceryView || 'active';
+
+    if(view === 'crossedOut'){
+      const hasAny = state.groceryItems.some(i => i.done);
+      const sections = GROCERY_CATEGORIES.map(cat => {
+        const items = state.groceryItems.filter(i => i.category === cat.key && i.done);
+        if(!items.length) return '';
+        return `
+          <div class="section-title" style="font-size:15px; margin-top:20px; margin-bottom:8px;">${cat.label}</div>
+          ${items.map(renderCrossedGroceryRow).join('')}`;
+      }).join('');
+      return `
+        <div class="section-title">Groceries</div>
+        <div class="section-sub">Crossed-out items stay here — restore them with the checkbox, or delete for good.</div>
+        ${renderGroceryViewToggle(view)}
+        ${hasAny ? `<button class="ghost-btn" id="clear-crossed-groceries-btn" style="margin-bottom:4px;">Delete all crossed out</button>${sections}` : '<div class="empty">Nothing crossed out yet.</div>'}`;
+    }
+
     const sections = GROCERY_CATEGORIES.map(cat => {
-      const items = state.groceryItems.filter(i => i.category === cat.key);
+      const items = state.groceryItems.filter(i => i.category === cat.key && !i.done);
       const rows = items.map(renderGroceryRow).join('');
       return `
         <div class="section-title" style="font-size:15px; margin-top:20px; margin-bottom:8px;">${cat.label}</div>
@@ -1489,11 +1525,10 @@
           <button data-new-grocery-btn="${cat.key}">Add</button>
         </div>`;
     }).join('');
-    const hasChecked = state.groceryItems.some(i => i.done);
     return `
       <div class="section-title">Groceries</div>
-      <div class="section-sub">Check things off as you shop — recipe ingredients land here automatically.</div>
-      ${hasChecked ? `<button class="ghost-btn" id="clear-checked-groceries-btn" style="margin-bottom:4px;">Clear checked items</button>` : ''}
+      <div class="section-sub">Check things off as you shop — they'll move to Crossed Out instead of disappearing.</div>
+      ${renderGroceryViewToggle(view)}
       ${sections}`;
   }
 
@@ -2089,6 +2124,7 @@
         state.addingRecipe = false;
         state.recipeDeleteArmed = false;
         state.recipeUseStatus = '';
+        state.groceryView = 'active';
         render(); window.scrollTo(0,0);
       });
     });
@@ -2726,6 +2762,12 @@
     }
 
     if(state.view === 'tab' && state.tab === 'groceries'){
+      root.querySelectorAll('[data-grocery-view]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          state.groceryView = btn.getAttribute('data-grocery-view');
+          render();
+        });
+      });
       root.querySelectorAll('[data-toggle-grocery]').forEach(btn => {
         btn.addEventListener('click', () => {
           const id = btn.getAttribute('data-toggle-grocery');
@@ -2751,7 +2793,7 @@
         btn.addEventListener('click', doAdd);
         input.addEventListener('keydown', e => { if(e.key === 'Enter') doAdd(); });
       });
-      const clearBtn = root.querySelector('#clear-checked-groceries-btn');
+      const clearBtn = root.querySelector('#clear-crossed-groceries-btn');
       if(clearBtn) clearBtn.addEventListener('click', () => {
         state.groceryItems = state.groceryItems.filter(x => !x.done);
         save();
