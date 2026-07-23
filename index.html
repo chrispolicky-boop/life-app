@@ -382,6 +382,18 @@
   }
   function normalizeRecipes(list){ return asArray(list).map(normalizeRecipe); }
 
+  function normalizeMealPlanEntry(m){
+    m = m || {};
+    const validType = RECIPE_CATEGORIES.some(c => c.key === m.mealType) ? m.mealType : 'dinner';
+    return {
+      id: m.id || makeId(),
+      date: /^\d{4}-\d{2}-\d{2}$/.test(m.date) ? m.date : isoDate(new Date()),
+      mealType: validType,
+      recipeId: m.recipeId || null
+    };
+  }
+  function normalizeMealPlan(list){ return asArray(list).map(normalizeMealPlanEntry); }
+
   const BUDGET_PERIODS = [
     { key: 'weekly', label: 'Weekly' },
     { key: 'monthly', label: 'Monthly' },
@@ -817,6 +829,10 @@
     newIngredientCategory: 'vegetables',
     recipeUseStatus: '',
     addingToGroceries: false,
+    mealPlan: [],
+    mealPlanPickerDay: null,
+    mealPlanPickerType: null,
+    mealPlanPickerRecipe: null,
     importPending: null,
     importStatus: '',
     sync: { status: 'connecting', lastSynced: null }
@@ -869,8 +885,8 @@
     fbDb.ref(SYNC_PATH).on('value', snap => {
       const val = snap.val();
       if(!val || !val.projects){ render(); return; }
-      const incomingStr = JSON.stringify({ projects: val.projects, budgets: val.budgets, savingsGoals: val.savingsGoals, earnings: val.earnings, calendarBlocks: val.calendarBlocks, todoTasks: val.todoTasks, goals: val.goals, groceryItems: val.groceryItems, recipes: val.recipes });
-      if(incomingStr === JSON.stringify({ projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings, calendarBlocks: state.calendarBlocks, todoTasks: state.todoTasks, goals: state.goals, groceryItems: state.groceryItems, recipes: state.recipes })){
+      const incomingStr = JSON.stringify({ projects: val.projects, budgets: val.budgets, savingsGoals: val.savingsGoals, earnings: val.earnings, calendarBlocks: val.calendarBlocks, todoTasks: val.todoTasks, goals: val.goals, groceryItems: val.groceryItems, recipes: val.recipes, mealPlan: val.mealPlan });
+      if(incomingStr === JSON.stringify({ projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings, calendarBlocks: state.calendarBlocks, todoTasks: state.todoTasks, goals: state.goals, groceryItems: state.groceryItems, recipes: state.recipes, mealPlan: state.mealPlan })){
         state.sync.lastSynced = val.updatedAt || new Date().toISOString();
         render();
         return;
@@ -888,8 +904,9 @@
       state.goals = normalizeGoals(val.goals);
       state.groceryItems = normalizeGroceryItems(val.groceryItems);
       state.recipes = normalizeRecipes(val.recipes);
+      state.mealPlan = normalizeMealPlan(val.mealPlan);
       state.sync.lastSynced = val.updatedAt || new Date().toISOString();
-      try{ localStorage.setItem(STORAGE_KEY, JSON.stringify({ projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings, calendarBlocks: state.calendarBlocks, todoTasks: state.todoTasks, goals: state.goals, groceryItems: state.groceryItems, recipes: state.recipes })); }catch(e){}
+      try{ localStorage.setItem(STORAGE_KEY, JSON.stringify({ projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings, calendarBlocks: state.calendarBlocks, todoTasks: state.todoTasks, goals: state.goals, groceryItems: state.groceryItems, recipes: state.recipes, mealPlan: state.mealPlan })); }catch(e){}
       render();
     }, () => {
       state.sync.status = 'error';
@@ -899,7 +916,7 @@
 
   function pushToCloud(){
     if(!fbDb || !state.user) return;
-    const payload = { projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings, calendarBlocks: state.calendarBlocks, todoTasks: state.todoTasks, goals: state.goals, groceryItems: state.groceryItems, recipes: state.recipes, updatedAt: new Date().toISOString() };
+    const payload = { projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings, calendarBlocks: state.calendarBlocks, todoTasks: state.todoTasks, goals: state.goals, groceryItems: state.groceryItems, recipes: state.recipes, mealPlan: state.mealPlan, updatedAt: new Date().toISOString() };
     fbDb.ref(SYNC_PATH).set(payload).then(() => {
       state.sync.lastSynced = payload.updatedAt;
     }).catch(() => {
@@ -923,6 +940,7 @@
         state.goals = [];
         state.groceryItems = [];
         state.recipes = [];
+        state.mealPlan = [];
       } else if(parsed){
         state.projects = normalizeProjects(parsed.projects);
         state.budgets = normalizeBudgets(parsed.budgets);
@@ -933,6 +951,7 @@
         state.goals = normalizeGoals(parsed.goals);
         state.groceryItems = normalizeGroceryItems(parsed.groceryItems);
         state.recipes = normalizeRecipes(parsed.recipes);
+        state.mealPlan = normalizeMealPlan(parsed.mealPlan);
       } else {
         state.projects = defaultData();
         state.budgets = [];
@@ -943,15 +962,16 @@
         state.goals = [];
         state.groceryItems = [];
         state.recipes = [];
+        state.mealPlan = [];
       }
-    }catch(e){ state.projects = defaultData(); state.budgets = []; state.savingsGoals = []; state.earnings = []; state.calendarBlocks = defaultCalendarBlocks(); state.todoTasks = []; state.goals = []; state.groceryItems = []; state.recipes = []; }
+    }catch(e){ state.projects = defaultData(); state.budgets = []; state.savingsGoals = []; state.earnings = []; state.calendarBlocks = defaultCalendarBlocks(); state.todoTasks = []; state.goals = []; state.groceryItems = []; state.recipes = []; state.mealPlan = []; }
     state.loaded = true;
     render();
     initFirebase();
     refreshPushStatus();
   }
   function save(rerender){
-    try{ localStorage.setItem(STORAGE_KEY, JSON.stringify({ projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings, calendarBlocks: state.calendarBlocks, todoTasks: state.todoTasks, goals: state.goals, groceryItems: state.groceryItems, recipes: state.recipes })); }catch(e){}
+    try{ localStorage.setItem(STORAGE_KEY, JSON.stringify({ projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings, calendarBlocks: state.calendarBlocks, todoTasks: state.todoTasks, goals: state.goals, groceryItems: state.groceryItems, recipes: state.recipes, mealPlan: state.mealPlan })); }catch(e){}
     pushToCloud();
     if(rerender !== false) render();
   }
@@ -1071,7 +1091,7 @@
           <input type="file" id="import-file" accept="application/json" style="display:none" />
         </div>
         ${state.importPending ? `
-        <div class="sync-sub" style="color:var(--gold); margin-top:10px;">This will replace the data on this device with the imported file (${state.importPending.projects.length} project${state.importPending.projects.length===1?'':'s'}, ${state.importPending.budgets.length} budget${state.importPending.budgets.length===1?'':'s'}, ${state.importPending.savingsGoals.length} savings goal${state.importPending.savingsGoals.length===1?'':'s'}, ${state.importPending.earnings.length} earning${state.importPending.earnings.length===1?'':'s'}, ${state.importPending.calendarBlocks.length} calendar block${state.importPending.calendarBlocks.length===1?'':'s'}, ${state.importPending.todoTasks.length} to-do task${state.importPending.todoTasks.length===1?'':'s'}, ${state.importPending.goals.length} goal${state.importPending.goals.length===1?'':'s'}, ${state.importPending.groceryItems.length} grocery item${state.importPending.groceryItems.length===1?'':'s'}, ${state.importPending.recipes.length} recipe${state.importPending.recipes.length===1?'':'s'}).</div>
+        <div class="sync-sub" style="color:var(--gold); margin-top:10px;">This will replace the data on this device with the imported file (${state.importPending.projects.length} project${state.importPending.projects.length===1?'':'s'}, ${state.importPending.budgets.length} budget${state.importPending.budgets.length===1?'':'s'}, ${state.importPending.savingsGoals.length} savings goal${state.importPending.savingsGoals.length===1?'':'s'}, ${state.importPending.earnings.length} earning${state.importPending.earnings.length===1?'':'s'}, ${state.importPending.calendarBlocks.length} calendar block${state.importPending.calendarBlocks.length===1?'':'s'}, ${state.importPending.todoTasks.length} to-do task${state.importPending.todoTasks.length===1?'':'s'}, ${state.importPending.goals.length} goal${state.importPending.goals.length===1?'':'s'}, ${state.importPending.groceryItems.length} grocery item${state.importPending.groceryItems.length===1?'':'s'}, ${state.importPending.recipes.length} recipe${state.importPending.recipes.length===1?'':'s'}, ${state.importPending.mealPlan.length} planned meal${state.importPending.mealPlan.length===1?'':'s'}).</div>
         <div class="sync-btn-row">
           <button class="sync-btn" id="import-confirm-btn">Replace with imported data</button>
           <button class="sync-btn secondary" id="import-cancel-btn">Cancel</button>
@@ -1490,14 +1510,105 @@
   }
 
   function renderGroceryViewToggle(view){
-    return `<div style="display:flex; gap:8px; margin-bottom:18px;">
-      <button data-grocery-view="active" class="ghost-btn" style="flex:1; ${view==='active' ? 'background:var(--teal); color:#fff; border-color:var(--teal);' : ''}">Active</button>
-      <button data-grocery-view="crossedOut" class="ghost-btn" style="flex:1; ${view==='crossedOut' ? 'background:var(--teal); color:#fff; border-color:var(--teal);' : ''}">Crossed Out</button>
+    const opts = [
+      { key: 'active', label: 'Active' },
+      { key: 'crossedOut', label: 'Crossed Out' },
+      { key: 'mealPlan', label: 'Meal Plan' }
+    ];
+    return `<div style="display:flex; gap:6px; margin-bottom:18px;">
+      ${opts.map(o => `<button data-grocery-view="${o.key}" class="ghost-btn" style="flex:1; ${view===o.key ? 'background:var(--teal); color:#fff; border-color:var(--teal);' : ''}">${o.label}</button>`).join('')}
     </div>`;
+  }
+
+  function mealPlanWeekDays(){
+    const sunday = startOfWeek(new Date(), 0);
+    const days = [];
+    for(let i = 0; i < 7; i++){
+      const d = new Date(sunday);
+      d.setDate(d.getDate() + i);
+      days.push(d);
+    }
+    return days;
+  }
+
+  function renderMealPlanTab(){
+    const days = mealPlanWeekDays();
+    const sections = days.map(d => {
+      const iso = isoDate(d);
+      const dayLabel = d.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+      const slots = RECIPE_CATEGORIES.map(slot => {
+        const entry = state.mealPlan.find(m => m.date === iso && m.mealType === slot.key);
+        const recipe = entry ? state.recipes.find(r => r.id === entry.recipeId) : null;
+        if(entry && recipe){
+          return `
+            <div class="item-card" style="display:flex; align-items:center; justify-content:space-between; padding:11px 14px;">
+              <div>
+                <div style="font-size:9.5px; font-family:var(--font-mono); text-transform:uppercase; color:var(--ink-soft); letter-spacing:.04em;">${slot.label}</div>
+                <div style="font-weight:600; font-size:14px; margin-top:2px;">${escapeHtml(recipe.title)}</div>
+              </div>
+              <button class="icon-btn" data-remove-meal="${entry.id}">✕</button>
+            </div>`;
+        }
+        return `<button class="card" data-pick-meal-day="${iso}" data-pick-meal-type="${slot.key}" style="width:100%; text-align:left; padding:12px 14px; color:var(--ink-soft); cursor:pointer;">+ Add ${slot.label}</button>`;
+      }).join('');
+      return `
+        <div class="section-title" style="font-size:15px; margin-top:20px; margin-bottom:8px;">${dayLabel}</div>
+        ${slots}`;
+    }).join('');
+    return `
+      <div class="section-title">Groceries</div>
+      <div class="section-sub">This week's meals — tap a slot to pull a recipe in from the Cookbook.</div>
+      ${renderGroceryViewToggle('mealPlan')}
+      ${sections}`;
+  }
+
+  function renderMealPlanPicker(){
+    const dayLabel = new Date(state.mealPlanPickerDay + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+    const slotMeta = RECIPE_CATEGORIES.find(c => c.key === state.mealPlanPickerType) || { label: 'Meal' };
+
+    if(state.mealPlanPickerRecipe){
+      const r = state.recipes.find(x => x.id === state.mealPlanPickerRecipe);
+      if(!r){
+        return `<button class="back-link" id="back-btn">← ${dayLabel}</button><div class="empty">That recipe no longer exists.</div>`;
+      }
+      return `
+        <button class="back-link" id="back-btn">← ${slotMeta.label} options</button>
+        <div class="section-title">${escapeHtml(r.title)}</div>
+        <div class="section-sub">Select ingredients to add to your grocery list.</div>
+        <div class="card">
+          <div class="sync-btn-row" style="margin-bottom:12px;">
+            <button class="sync-btn secondary" id="select-all-ingredients-btn">Select all</button>
+            <button class="sync-btn secondary" id="select-none-ingredients-btn">Select none</button>
+          </div>
+          ${r.ingredients.length ? r.ingredients.map(ing => `
+            <label style="display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid var(--line); font-size:14px;">
+              <input type="checkbox" data-select-ingredient="${ing.id}" checked style="width:18px; height:18px; flex-shrink:0;" />
+              <span>${escapeHtml(ing.text)}</span>
+            </label>`).join('') : '<div class="empty" style="padding:4px 2px;">This recipe has no ingredients yet.</div>'}
+          <div class="sync-btn-row" style="margin-top:14px;">
+            <button class="sync-btn" id="confirm-meal-plan-btn">Add selected &amp; save meal</button>
+            <button class="sync-btn secondary" id="skip-ingredients-btn">Skip — just save meal</button>
+          </div>
+        </div>`;
+    }
+
+    const recipes = state.recipes.filter(r => r.category === state.mealPlanPickerType);
+    const rows = recipes.map(r => `
+      <button class="item-card" style="display:block; width:100%; text-align:left; border-left-color:var(--coral);" data-pick-meal-recipe="${r.id}">
+        <div style="font-weight:600; font-size:14.5px;">${escapeHtml(r.title)}</div>
+        <div class="proj-sub" style="margin-top:6px;">${r.ingredients.length} ingredient${r.ingredients.length===1?'':'s'}</div>
+      </button>`).join('');
+    return `
+      <button class="back-link" id="back-btn">← ${dayLabel}</button>
+      <div class="section-title">${slotMeta.label} for ${dayLabel}</div>
+      <div class="section-sub">Pick a recipe from your Cookbook.</div>
+      ${recipes.length ? rows : `<div class="empty">No ${slotMeta.label.toLowerCase()} recipes yet — add one in the Cookbook first.</div>`}`;
   }
 
   function renderGroceriesTab(){
     const view = state.groceryView || 'active';
+
+    if(view === 'mealPlan') return renderMealPlanTab();
 
     if(view === 'crossedOut'){
       const hasAny = state.groceryItems.some(i => i.done);
@@ -2078,6 +2189,8 @@
       const r = state.recipes.find(x => x.id === state.activeRecipe);
       if(!r){ state.view = 'tab'; state.tab = 'cookbook'; bodyHtml = renderRecipesTab(); }
       else bodyHtml = renderRecipeDetail(r);
+    } else if(state.view === 'mealPlanPicker'){
+      bodyHtml = renderMealPlanPicker();
     } else {
       if(state.tab === 'calendar') bodyHtml = renderCalendarTab();
       else if(state.tab === 'projects') bodyHtml = renderProjectsTab();
@@ -2144,6 +2257,9 @@
         state.recipeUseStatus = '';
         state.addingToGroceries = false;
         state.groceryView = 'active';
+        state.mealPlanPickerDay = null;
+        state.mealPlanPickerType = null;
+        state.mealPlanPickerRecipe = null;
         render(); window.scrollTo(0,0);
       });
     });
@@ -2191,6 +2307,15 @@
         state.view = 'tab';
         state.activeRecipeCategory = null;
         state.addingRecipe = false;
+      } else if(state.view === 'mealPlanPicker' && state.mealPlanPickerRecipe){
+        // step back to the recipe list for this meal slot
+        state.mealPlanPickerRecipe = null;
+      } else if(state.view === 'mealPlanPicker'){
+        state.view = 'tab';
+        state.tab = 'groceries';
+        state.groceryView = 'mealPlan';
+        state.mealPlanPickerDay = null;
+        state.mealPlanPickerType = null;
       } else {
         state.view = 'tab';
         state.activeProject = null;
@@ -2240,6 +2365,7 @@
         state.goals = state.importPending.goals;
         state.groceryItems = state.importPending.groceryItems;
         state.recipes = state.importPending.recipes;
+        state.mealPlan = state.importPending.mealPlan;
         state.importPending = null;
         state.importStatus = 'ok:Import complete.';
         save();
@@ -2818,6 +2944,22 @@
         state.groceryItems = state.groceryItems.filter(x => !x.done);
         save();
       });
+      root.querySelectorAll('[data-pick-meal-day]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          state.mealPlanPickerDay = btn.getAttribute('data-pick-meal-day');
+          state.mealPlanPickerType = btn.getAttribute('data-pick-meal-type');
+          state.mealPlanPickerRecipe = null;
+          state.view = 'mealPlanPicker';
+          render(); window.scrollTo(0,0);
+        });
+      });
+      root.querySelectorAll('[data-remove-meal]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const id = btn.getAttribute('data-remove-meal');
+          state.mealPlan = state.mealPlan.filter(m => m.id !== id);
+          save();
+        });
+      });
       return;
     }
 
@@ -2829,6 +2971,53 @@
           render(); window.scrollTo(0,0);
         });
       });
+      return;
+    }
+
+    if(state.view === 'mealPlanPicker'){
+      if(state.mealPlanPickerRecipe){
+        const r = state.recipes.find(x => x.id === state.mealPlanPickerRecipe);
+        if(!r) return;
+        const selectAllBtn = root.querySelector('#select-all-ingredients-btn');
+        if(selectAllBtn) selectAllBtn.addEventListener('click', () => {
+          root.querySelectorAll('[data-select-ingredient]').forEach(cb => { cb.checked = true; });
+        });
+        const selectNoneBtn = root.querySelector('#select-none-ingredients-btn');
+        if(selectNoneBtn) selectNoneBtn.addEventListener('click', () => {
+          root.querySelectorAll('[data-select-ingredient]').forEach(cb => { cb.checked = false; });
+        });
+        const confirmBtn = root.querySelector('#confirm-meal-plan-btn');
+        if(confirmBtn) confirmBtn.addEventListener('click', () => {
+          const selectedIds = Array.from(root.querySelectorAll('[data-select-ingredient]:checked')).map(cb => cb.getAttribute('data-select-ingredient'));
+          const selected = r.ingredients.filter(ing => selectedIds.includes(ing.id));
+          assignMealPlan(state.mealPlanPickerDay, state.mealPlanPickerType, r.id);
+          state.view = 'tab';
+          state.tab = 'groceries';
+          state.groceryView = 'mealPlan';
+          state.mealPlanPickerDay = null;
+          state.mealPlanPickerType = null;
+          state.mealPlanPickerRecipe = null;
+          useRecipe(r, selected);
+        });
+        const skipBtn = root.querySelector('#skip-ingredients-btn');
+        if(skipBtn) skipBtn.addEventListener('click', () => {
+          assignMealPlan(state.mealPlanPickerDay, state.mealPlanPickerType, r.id);
+          state.view = 'tab';
+          state.tab = 'groceries';
+          state.groceryView = 'mealPlan';
+          state.mealPlanPickerDay = null;
+          state.mealPlanPickerType = null;
+          state.mealPlanPickerRecipe = null;
+          save();
+        });
+      } else {
+        root.querySelectorAll('[data-pick-meal-recipe]').forEach(btn => {
+          btn.addEventListener('click', () => {
+            state.mealPlanPickerRecipe = btn.getAttribute('data-pick-meal-recipe');
+            render(); window.scrollTo(0,0);
+          });
+        });
+      }
       return;
     }
 
@@ -3102,8 +3291,15 @@
     save();
   }
 
+  function assignMealPlan(dateIso, mealType, recipeId){
+    let entry = state.mealPlan.find(m => m.date === dateIso && m.mealType === mealType);
+    if(entry) entry.recipeId = recipeId;
+    else { entry = { id: makeId(), date: dateIso, mealType, recipeId }; state.mealPlan.push(entry); }
+    return entry;
+  }
+
   function exportData(){
-    const payload = { app: 'project-hub', version: 1, exportedAt: new Date().toISOString(), projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings, calendarBlocks: state.calendarBlocks, todoTasks: state.todoTasks, goals: state.goals, groceryItems: state.groceryItems, recipes: state.recipes };
+    const payload = { app: 'project-hub', version: 1, exportedAt: new Date().toISOString(), projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals, earnings: state.earnings, calendarBlocks: state.calendarBlocks, todoTasks: state.todoTasks, goals: state.goals, groceryItems: state.groceryItems, recipes: state.recipes, mealPlan: state.mealPlan };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -3131,7 +3327,8 @@
           todoTasks: normalizeTodoTasks(parsed && parsed.todoTasks),
           goals: normalizeGoals(parsed && parsed.goals),
           groceryItems: normalizeGroceryItems(parsed && parsed.groceryItems),
-          recipes: normalizeRecipes(parsed && parsed.recipes)
+          recipes: normalizeRecipes(parsed && parsed.recipes),
+          mealPlan: normalizeMealPlan(parsed && parsed.mealPlan)
         };
         state.importStatus = '';
         render();
