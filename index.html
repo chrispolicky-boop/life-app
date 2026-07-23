@@ -1553,23 +1553,16 @@
     return msg;
   }
 
-  function renderIngredientRow(ing){
-    const catLabel = (GROCERY_CATEGORIES.find(c => c.key === ing.category) || {}).label || '';
-    return `
-      <div class="item-card" style="padding:11px 14px;">
-        <div class="row">
-          <div class="txt">${escapeHtml(ing.text)}</div>
-          <div class="btn-row">
-            <button class="icon-btn" data-del-ingredient="${ing.id}">✕</button>
-          </div>
-        </div>
-        <div style="margin-top:6px; font-size:10.5px; font-family:var(--font-mono); color:var(--ink-soft); text-transform:uppercase; letter-spacing:.04em;">${catLabel}</div>
-      </div>`;
-  }
-
   function renderRecipeDetail(r){
     const meta = RECIPE_CATEGORIES.find(c => c.key === r.category) || { label: 'Recipes' };
     const ingredientOptions = GROCERY_CATEGORIES.map(c => `<option value="${c.key}" ${state.newIngredientCategory===c.key?'selected':''}>${c.label}</option>`).join('');
+
+    const ingredientLines = r.ingredients.map(ing => `
+      <li style="display:flex; align-items:center; justify-content:space-between; gap:10px; padding:8px 0; border-bottom:1px solid var(--line);">
+        <span>${escapeHtml(ing.text)}</span>
+        <button class="icon-btn" data-del-ingredient="${ing.id}" style="flex-shrink:0;">✕</button>
+      </li>`).join('');
+
     return `
       <button class="back-link" id="back-btn">← ${meta.label}</button>
       <div class="hero-card" style="display:block; border-left:4px solid var(--coral);">
@@ -1584,9 +1577,21 @@
         ${state.recipeUseStatus ? `<div class="sync-sub" style="color:var(--forest); margin-top:10px; text-align:center;">${escapeHtml(state.recipeUseStatus)}</div>` : ''}
       </div>
 
-      <div class="section-title" style="font-size:16px;">Ingredients</div>
-      <div class="section-sub">Each one gets a grocery category so it lands in the right spot.</div>
-      ${r.ingredients.length ? r.ingredients.map(renderIngredientRow).join('') : '<div class="empty">No ingredients yet.</div>'}
+      <div class="card">
+        <div class="k">Ingredients</div>
+        ${r.ingredients.length
+          ? `<ul style="list-style:none; padding:0; margin:0; font-size:14px;">${ingredientLines}</ul>`
+          : '<div class="empty" style="padding:4px 2px;">No ingredients yet — add some below.</div>'}
+      </div>
+
+      <div class="card">
+        <div class="k">Instructions</div>
+        ${r.instructions.trim()
+          ? `<div style="font-size:14px; line-height:1.65; white-space:pre-wrap;">${escapeHtml(r.instructions)}</div>`
+          : '<div class="empty" style="padding:4px 2px;">No instructions yet — add them below.</div>'}
+      </div>
+
+      <div class="section-title" style="font-size:16px; margin-top:24px;">Add an Ingredient</div>
       <div class="add-row" style="flex-wrap:wrap;">
         <input type="text" id="new-ingredient-text" placeholder="Ingredient (e.g. 2 cups flour)" style="flex:1 1 100%;" />
         <select id="new-ingredient-category" class="money-input" style="flex:1;">${ingredientOptions}</select>
@@ -1594,7 +1599,7 @@
       </div>
 
       <div class="card" style="margin-top:20px;">
-        <div class="k">Instructions</div>
+        <div class="k">Edit Instructions</div>
         <textarea data-recipe-instructions placeholder="Step by step, however you'd write it for yourself.">${escapeHtml(r.instructions)}</textarea>
       </div>
 
