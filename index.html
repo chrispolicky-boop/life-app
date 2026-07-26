@@ -306,6 +306,7 @@
       color: p.color || COLORS[0],
       scope: p.scope || '',
       notes: p.notes || '',
+      chatUrl: p.chatUrl || '',
       tasks: asArray(p.tasks).map(t => ({ id: (t && t.id) || makeId(), text: (t && t.text) || '', done: !!(t && t.done) }))
     };
   }
@@ -2139,7 +2140,17 @@
       <div class="card" style="--cat-color:${p.color}">
         <div class="k">Ask AI about this project</div>
         <button class="ai-btn" style="--cat-color:${p.color}" id="ask-ai-btn">${icon('ai')} Open in Claude</button>
+        ${p.chatUrl ? `
+        <div class="ai-hint">Opens your saved conversation for this project.</div>
+        <div class="sync-btn-row" style="margin-top:10px;">
+          <button class="sync-btn secondary" id="unlink-chat-btn">Unlink conversation</button>
+        </div>` : `
         <div class="ai-hint">Opens a new Claude chat pre-filled with this project's scope, tasks, and notes.</div>
+        <div class="k" style="margin-top:14px;">Save this conversation for next time</div>
+        <div class="add-row">
+          <input type="text" id="chat-url-input" placeholder="Paste the conversation link here…" />
+          <button id="save-chat-url-btn">Save</button>
+        </div>`}
       </div>
 
       <div class="section-title" style="font-size:16px;">Tasks</div>
@@ -3183,9 +3194,28 @@
       root.querySelector('[data-notes]').addEventListener('blur', e => { p.notes = e.target.value; save(); });
 
       root.querySelector('#ask-ai-btn').addEventListener('click', () => {
-        const url = 'https://claude.ai/new?q=' + encodeURIComponent(buildAiPrompt(p));
+        const url = p.chatUrl || ('https://claude.ai/new?q=' + encodeURIComponent(buildAiPrompt(p)));
         window.open(url, '_blank', 'noopener');
       });
+
+      const unlinkChatBtn = root.querySelector('#unlink-chat-btn');
+      if(unlinkChatBtn) unlinkChatBtn.addEventListener('click', () => {
+        p.chatUrl = '';
+        save();
+      });
+
+      const saveChatUrlBtn = root.querySelector('#save-chat-url-btn');
+      const chatUrlInput = root.querySelector('#chat-url-input');
+      if(saveChatUrlBtn && chatUrlInput){
+        const doSaveChatUrl = () => {
+          const v = chatUrlInput.value.trim();
+          if(!v) return;
+          p.chatUrl = v;
+          save();
+        };
+        saveChatUrlBtn.addEventListener('click', doSaveChatUrl);
+        chatUrlInput.addEventListener('keydown', e => { if(e.key === 'Enter') doSaveChatUrl(); });
+      }
 
       root.querySelectorAll('[data-toggle]').forEach(btn => {
         btn.addEventListener('click', () => {
