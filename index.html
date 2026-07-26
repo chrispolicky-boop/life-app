@@ -992,6 +992,20 @@
     return Math.round((done/tasks.length)*100);
   }
   function escapeHtml(str){ const d = document.createElement('div'); d.textContent = str || ''; return d.innerHTML; }
+
+  // iOS treats window.open() from an installed home-screen PWA as a plain
+  // Safari tab, skipping the universal-link handoff to a native app. A real
+  // <a> click goes through the normal link-navigation path instead, so
+  // claude.ai links here open the Claude app when it's installed.
+  function openExternalLink(url){
+    const a = document.createElement('a');
+    a.href = url;
+    a.target = '_blank';
+    a.rel = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }
   function fmtDate(){ return new Date().toLocaleDateString('en-US',{weekday:'long', month:'long', day:'numeric'}); }
   function greeting(){
     const h = new Date().getHours();
@@ -3130,7 +3144,7 @@
       const estimateBtn = root.querySelector('#estimate-recipe-btn');
       if(estimateBtn) estimateBtn.addEventListener('click', () => {
         const url = 'https://claude.ai/new?q=' + encodeURIComponent(buildRecipeAiPrompt(r));
-        window.open(url, '_blank', 'noopener');
+        openExternalLink(url);
       });
 
       const selectAllBtn = root.querySelector('#select-all-ingredients-btn');
@@ -3196,7 +3210,7 @@
 
       root.querySelector('#ask-ai-btn').addEventListener('click', () => {
         const url = p.chatUrl || ('https://claude.ai/new?q=' + encodeURIComponent(buildAiPrompt(p)));
-        window.open(url, '_blank', 'noopener');
+        openExternalLink(url);
       });
 
       const unlinkChatBtn = root.querySelector('#unlink-chat-btn');
