@@ -146,6 +146,8 @@
   .txt.done{ text-decoration: line-through; color: var(--ink-soft); }
   .icon-btn{ background:none; border:none; color: var(--ink-soft); font-size:12px; padding: 3px 5px; font-family: var(--font-body); }
   .icon-btn:hover{ color: var(--ink); }
+  .icon-btn svg{ width:15px; height:15px; display:block; }
+  .task-handle{ cursor:grab; touch-action:none; -webkit-user-select:none; user-select:none; }
   .btn-row{ display:flex; gap: 2px; }
   .empty{ color: var(--ink-soft); font-size: 13.5px; font-style: italic; padding: 6px 2px 14px; }
 
@@ -254,7 +256,8 @@
       cart: '<circle cx="9" cy="20" r="1.3"/><circle cx="18" cy="20" r="1.3"/><path d="M2.5 3h2l2.3 12a2 2 0 002 1.7h8.7a2 2 0 002-1.6L21 8H6.5"/>',
       pot: '<path d="M4 10h16l-1.2 8.2A2 2 0 0117 20H7a2 2 0 01-1.8-1.8z"/><path d="M2 10h20"/><path d="M8 10V6.5A4 4 0 0112 2.5h0a4 4 0 014 3.5V10"/>',
       calendar: '<rect x="3" y="4.5" width="18" height="16" rx="2.5"/><path d="M16 2.5v4M8 2.5v4M3 10h18"/>',
-      more: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>'
+      more: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+      grip: '<circle cx="9" cy="6" r="1.3" fill="currentColor" stroke="none"/><circle cx="9" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="9" cy="18" r="1.3" fill="currentColor" stroke="none"/><circle cx="15" cy="6" r="1.3" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="15" cy="18" r="1.3" fill="currentColor" stroke="none"/>'
     };
     return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' + paths[name] + '</svg>';
   }
@@ -2105,15 +2108,14 @@
     const p2 = pct(p.tasks);
     const doneCt = p.tasks.filter(t=>t.done).length;
     const taskRows = p.tasks.map((t, i) => `
-      <div class="item-card" style="--cat-color:${p.color}">
+      <div class="item-card" data-task-row="${t.id}" style="--cat-color:${p.color};">
         <div class="row">
           <div style="font-family:var(--font-mono); font-weight:700; font-size:12.5px; color:var(--ink-soft); width:18px; flex-shrink:0; text-align:center; padding-top:3px;">${i+1}</div>
           <button class="check ${t.done?'done':''}" style="--cat-color:${p.color}" data-toggle="${t.id}"></button>
           <div class="txt ${t.done?'done':''}">${escapeHtml(t.text)}</div>
           <div class="btn-row">
-            <button class="icon-btn" data-move-task-up="${t.id}" ${i===0 ? 'style="opacity:.3;"' : ''}>▲</button>
-            <button class="icon-btn" data-move-task-down="${t.id}" ${i===p.tasks.length-1 ? 'style="opacity:.3;"' : ''}>▼</button>
             <button class="icon-btn" data-del-task="${t.id}">✕</button>
+            <button class="icon-btn task-handle" data-task-handle="${t.id}">${icon('grip')}</button>
           </div>
         </div>
       </div>`).join('');
@@ -2141,8 +2143,8 @@
       </div>
 
       <div class="section-title" style="font-size:16px;">Tasks</div>
-      <div class="section-sub">Numbered in order — use ▲▼ to reorder, checking off moves the ring above.</div>
-      ${p.tasks.length ? taskRows : '<div class="empty">No tasks yet — add your first one below.</div>'}
+      <div class="section-sub">Numbered in order — drag the grip to reorder, checking off moves the ring above.</div>
+      <div id="task-list">${p.tasks.length ? taskRows : '<div class="empty">No tasks yet — add your first one below.</div>'}</div>
       <div class="add-row">
         <input type="text" id="task-input" placeholder="Add a task…" />
         <button style="--cat-color:${p.color}" id="add-task-btn">Add</button>
@@ -3199,12 +3201,7 @@
           save();
         });
       });
-      root.querySelectorAll('[data-move-task-up]').forEach(btn => {
-        btn.addEventListener('click', () => { moveTask(p, btn.getAttribute('data-move-task-up'), -1); });
-      });
-      root.querySelectorAll('[data-move-task-down]').forEach(btn => {
-        btn.addEventListener('click', () => { moveTask(p, btn.getAttribute('data-move-task-down'), 1); });
-      });
+      attachTaskDragHandles(p);
 
       const taskInput = root.querySelector('#task-input');
       const addTaskBtn = root.querySelector('#add-task-btn');
@@ -3243,14 +3240,72 @@
     save();
   }
 
-  function moveTask(p, taskId, direction){
-    const idx = p.tasks.findIndex(t => t.id === taskId);
-    const swapIdx = idx + direction;
-    if(idx === -1 || swapIdx < 0 || swapIdx >= p.tasks.length) return;
-    const tmp = p.tasks[idx];
-    p.tasks[idx] = p.tasks[swapIdx];
-    p.tasks[swapIdx] = tmp;
-    save();
+  function attachTaskDragHandles(p){
+    const container = root.querySelector('#task-list');
+    if(!container) return;
+    const rows = Array.from(container.querySelectorAll('[data-task-row]'));
+
+    rows.forEach((row, startIndex) => {
+      const handle = row.querySelector('[data-task-handle]');
+      if(!handle) return;
+
+      let dragging = false, startY = 0, originals = [], draggedHeight = 0, targetIndex = startIndex;
+
+      handle.addEventListener('pointerdown', e => {
+        dragging = true;
+        targetIndex = startIndex;
+        startY = e.clientY;
+        try{ handle.setPointerCapture(e.pointerId); }catch(err){}
+        originals = rows.map(r => r.getBoundingClientRect());
+        draggedHeight = originals[startIndex].height + 10;
+        row.style.position = 'relative';
+        row.style.zIndex = '20';
+        row.style.boxShadow = '0 10px 24px rgba(0,0,0,0.5)';
+        row.style.transition = 'none';
+        container.style.userSelect = 'none';
+      });
+
+      handle.addEventListener('pointermove', e => {
+        if(!dragging) return;
+        const dy = e.clientY - startY;
+        row.style.transform = `translateY(${dy}px)`;
+        const draggedCenter = originals[startIndex].top + originals[startIndex].height / 2 + dy;
+
+        let newTarget = startIndex;
+        rows.forEach((other, i) => {
+          if(i === startIndex) return;
+          const otherCenter = originals[i].top + originals[i].height / 2;
+          other.style.transition = 'transform 120ms ease';
+          if(i < startIndex && draggedCenter < otherCenter){
+            other.style.transform = `translateY(${draggedHeight}px)`;
+            newTarget = Math.min(newTarget, i);
+          } else if(i > startIndex && draggedCenter > otherCenter){
+            other.style.transform = `translateY(${-draggedHeight}px)`;
+            newTarget = Math.max(newTarget, i);
+          } else {
+            other.style.transform = '';
+          }
+        });
+        targetIndex = newTarget;
+      });
+
+      const finish = () => {
+        if(!dragging) return;
+        dragging = false;
+        container.style.userSelect = '';
+        if(targetIndex !== startIndex){
+          const [moved] = p.tasks.splice(startIndex, 1);
+          p.tasks.splice(targetIndex, 0, moved);
+          save();
+        } else {
+          row.style.transform = '';
+          row.style.boxShadow = '';
+          rows.forEach(r => { r.style.transform = ''; });
+        }
+      };
+      handle.addEventListener('pointerup', finish);
+      handle.addEventListener('pointercancel', finish);
+    });
   }
 
   function addBudget(name, limit, period){
