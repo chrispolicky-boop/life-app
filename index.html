@@ -2104,12 +2104,15 @@
   function renderProject(p){
     const p2 = pct(p.tasks);
     const doneCt = p.tasks.filter(t=>t.done).length;
-    const taskRows = p.tasks.map(t => `
+    const taskRows = p.tasks.map((t, i) => `
       <div class="item-card" style="--cat-color:${p.color}">
         <div class="row">
+          <div style="font-family:var(--font-mono); font-weight:700; font-size:12.5px; color:var(--ink-soft); width:18px; flex-shrink:0; text-align:center; padding-top:3px;">${i+1}</div>
           <button class="check ${t.done?'done':''}" style="--cat-color:${p.color}" data-toggle="${t.id}"></button>
           <div class="txt ${t.done?'done':''}">${escapeHtml(t.text)}</div>
           <div class="btn-row">
+            <button class="icon-btn" data-move-task-up="${t.id}" ${i===0 ? 'style="opacity:.3;"' : ''}>▲</button>
+            <button class="icon-btn" data-move-task-down="${t.id}" ${i===p.tasks.length-1 ? 'style="opacity:.3;"' : ''}>▼</button>
             <button class="icon-btn" data-del-task="${t.id}">✕</button>
           </div>
         </div>
@@ -2138,7 +2141,7 @@
       </div>
 
       <div class="section-title" style="font-size:16px;">Tasks</div>
-      <div class="section-sub">Checking these off moves the ring above.</div>
+      <div class="section-sub">Numbered in order — use ▲▼ to reorder, checking off moves the ring above.</div>
       ${p.tasks.length ? taskRows : '<div class="empty">No tasks yet — add your first one below.</div>'}
       <div class="add-row">
         <input type="text" id="task-input" placeholder="Add a task…" />
@@ -3196,6 +3199,12 @@
           save();
         });
       });
+      root.querySelectorAll('[data-move-task-up]').forEach(btn => {
+        btn.addEventListener('click', () => { moveTask(p, btn.getAttribute('data-move-task-up'), -1); });
+      });
+      root.querySelectorAll('[data-move-task-down]').forEach(btn => {
+        btn.addEventListener('click', () => { moveTask(p, btn.getAttribute('data-move-task-down'), 1); });
+      });
 
       const taskInput = root.querySelector('#task-input');
       const addTaskBtn = root.querySelector('#add-task-btn');
@@ -3231,6 +3240,16 @@
     state.activeProject = newP.id;
     state.view = 'project';
     state.addingProject = false;
+    save();
+  }
+
+  function moveTask(p, taskId, direction){
+    const idx = p.tasks.findIndex(t => t.id === taskId);
+    const swapIdx = idx + direction;
+    if(idx === -1 || swapIdx < 0 || swapIdx >= p.tasks.length) return;
+    const tmp = p.tasks[idx];
+    p.tasks[idx] = p.tasks[swapIdx];
+    p.tasks[swapIdx] = tmp;
     save();
   }
 
