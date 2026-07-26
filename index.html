@@ -2141,14 +2141,15 @@
         <div class="k">Ask AI about this project</div>
         <button class="ai-btn" style="--cat-color:${p.color}" id="ask-ai-btn">${icon('ai')} Open in Claude</button>
         ${p.chatUrl ? `
-        <div class="ai-hint">Opens your saved conversation for this project.</div>
+        <div class="ai-hint">Opens your saved link for this project.</div>
         <div class="sync-btn-row" style="margin-top:10px;">
-          <button class="sync-btn secondary" id="unlink-chat-btn">Unlink conversation</button>
+          <button class="sync-btn secondary" id="unlink-chat-btn">Unlink</button>
         </div>` : `
         <div class="ai-hint">Opens a new Claude chat pre-filled with this project's scope, tasks, and notes.</div>
-        <div class="k" style="margin-top:14px;">Save this conversation for next time</div>
+        <div class="k" style="margin-top:14px;">Save a link for next time</div>
+        <div class="ai-hint" style="margin-bottom:8px;">Paste a specific chat, or your Claude Project's page (the one listing all its conversations) to jump straight there instead.</div>
         <div class="add-row">
-          <input type="text" id="chat-url-input" placeholder="Paste the conversation link here…" />
+          <input type="text" id="chat-url-input" placeholder="Paste a chat or Claude Project link…" />
           <button id="save-chat-url-btn">Save</button>
         </div>`}
       </div>
