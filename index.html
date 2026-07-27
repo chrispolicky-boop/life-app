@@ -705,6 +705,8 @@
   };
   const SYNC_PATH = 'projecthub';
   const PUSH_PATH = 'projecthubPush';
+  const BACKUP_PATH = 'projecthubBackups';
+  const MAX_BACKUPS = 12;
   const OWNER_LOGIN_EMAIL = 'chrispolicky@project-hub.app';
   const VAPID_PUBLIC_KEY = 'BBp7BYBbDyD85Ia9XO8Xx8kg-Q1DACElPI9juqj0R6_VufS-0lTKssvj3sgsHN0Uwddznnd_VguZIZP-Q8WP_SA';
   let fbDb = null;
@@ -846,6 +848,9 @@
     mealPlanPickerRecipe: null,
     importPending: null,
     importStatus: '',
+    syncOverwriteWarning: null,
+    syncBackups: [],
+    restoringBackupId: null,
     sync: { status: 'connecting', lastSynced: null }
   };
 
@@ -934,6 +939,95 @@
       state.sync.status = 'error';
       render();
     });
+  }
+
+  function itemCount(d){
+    if(!d) return 0;
+    const keys = ['projects','budgets','savingsGoals','earnings','calendarBlocks','todoTasks','goals','groceryItems','recipes','mealPlan'];
+    return keys.reduce((sum, k) => sum + asArray(d[k]).length, 0);
+  }
+
+  function pruneOldBackups(){
+    return fbDb.ref(BACKUP_PATH).once('value').then(snap => {
+      const val = snap.val();
+      if(!val) return;
+      const keys = Object.keys(val).sort();
+      const excess = keys.length - MAX_BACKUPS;
+      if(excess > 0){
+        return Promise.all(keys.slice(0, excess).map(k => fbDb.ref(BACKUP_PATH + '/' + k).remove()));
+      }
+    }).catch(() => {});
+  }
+
+  function backupCloudSnapshot(cloudVal){
+    if(!fbDb || !state.user || !cloudVal) return Promise.resolve();
+    const backupId = 'b' + Date.now();
+    return fbDb.ref(BACKUP_PATH + '/' + backupId).set(cloudVal).then(() => pruneOldBackups()).catch(() => {});
+  }
+
+  function manualSyncNow(){
+    if(!fbDb || !state.user) return;
+    state.syncOverwriteWarning = null;
+    fbDb.ref(SYNC_PATH).once('value').then(snap => {
+      const cloudVal = snap.val();
+      const cloudCount = itemCount(cloudVal);
+      const localCount = itemCount({
+        projects: state.projects, budgets: state.budgets, savingsGoals: state.savingsGoals,
+        earnings: state.earnings, calendarBlocks: state.calendarBlocks, todoTasks: state.todoTasks,
+        goals: state.goals, groceryItems: state.groceryItems, recipes: state.recipes, mealPlan: state.mealPlan
+      });
+      if(cloudVal && cloudCount > localCount){
+        state.syncOverwriteWarning = { cloudCount, localCount, cloudVal };
+        render();
+        return;
+      }
+      backupCloudSnapshot(cloudVal).then(() => { pushToCloud(); render(); });
+    }).catch(() => { pushToCloud(); render(); });
+  }
+
+  function confirmOverwriteSync(){
+    const cloudVal = state.syncOverwriteWarning && state.syncOverwriteWarning.cloudVal;
+    state.syncOverwriteWarning = null;
+    backupCloudSnapshot(cloudVal).then(() => { pushToCloud(); render(); });
+  }
+
+  function cancelOverwriteSync(){
+    state.syncOverwriteWarning = null;
+    render();
+  }
+
+  function loadBackupsList(){
+    if(!fbDb || !state.user) return;
+    fbDb.ref(BACKUP_PATH).once('value').then(snap => {
+      const val = snap.val() || {};
+      state.syncBackups = Object.keys(val).sort().reverse().map(key => ({
+        id: key,
+        updatedAt: val[key] && val[key].updatedAt,
+        count: itemCount(val[key])
+      }));
+      render();
+    }).catch(() => {});
+  }
+
+  function restoreBackup(backupId){
+    if(!fbDb || !state.user) return;
+    fbDb.ref(BACKUP_PATH + '/' + backupId).once('value').then(snap => {
+      const data = snap.val();
+      if(!data) return;
+      state.projects = normalizeProjects(data.projects);
+      state.budgets = normalizeBudgets(data.budgets);
+      state.savingsGoals = normalizeSavingsGoals(data.savingsGoals);
+      state.earnings = normalizeEarnings(data.earnings);
+      state.calendarBlocks = normalizeCalendarBlocks(data.calendarBlocks);
+      state.todoTasks = normalizeTodoTasks(data.todoTasks);
+      state.goals = normalizeGoals(data.goals);
+      state.groceryItems = normalizeGroceryItems(data.groceryItems);
+      state.recipes = normalizeRecipes(data.recipes);
+      state.mealPlan = normalizeMealPlan(data.mealPlan);
+      state.restoringBackupId = null;
+      state.importStatus = 'ok:Restored from backup.';
+      save();
+    }).catch(() => {});
   }
 
   async function loadState(){
@@ -1092,6 +1186,16 @@
         `}
       </div>
 
+      ${state.syncOverwriteWarning ? `
+      <div class="sync-page-card" style="border-color:var(--gold);">
+        <div class="sync-status-text" style="color:var(--gold); margin-bottom:4px;">Wait — check this first</div>
+        <div class="sync-sub">The cloud currently has more saved (${state.syncOverwriteWarning.cloudCount} items) than this device (${state.syncOverwriteWarning.localCount} items). Pushing now will replace the cloud copy with what's on this device. If that's not what you want, cancel and sync from the device that has your real data instead.</div>
+        <div class="sync-btn-row" style="margin-top:12px;">
+          <button class="sync-btn danger" id="confirm-overwrite-btn">Push anyway</button>
+          <button class="sync-btn secondary" id="cancel-overwrite-btn">Cancel</button>
+        </div>
+      </div>` : ''}
+
       <div class="sync-page-card">
         <div class="sync-status-text" style="margin-bottom:4px;">Notifications</div>
         ${!state.user ? `
@@ -1122,7 +1226,21 @@
           <button class="sync-btn secondary" id="import-cancel-btn">Cancel</button>
         </div>` : ''}
         ${state.importStatus ? `<div class="sync-sub" style="color:${state.importStatus.startsWith('error:') ? 'var(--pink)' : 'var(--forest)'}; margin-top:10px;">${escapeHtml(state.importStatus.replace(/^(error|ok):/,''))}</div>` : ''}
-      </div>`;
+      </div>
+
+      ${state.user ? `
+      <div class="sync-page-card">
+        <div class="sync-status-text" style="margin-bottom:4px;">Cloud backups</div>
+        <div class="sync-sub">A snapshot is saved automatically right before every manual "Sync now" push, so you can undo an accidental overwrite.</div>
+        ${state.syncBackups && state.syncBackups.length ? state.syncBackups.map(b => `
+          <div class="item-card" style="display:flex; align-items:center; justify-content:space-between; padding:12px 14px;">
+            <div>
+              <div style="font-weight:600; font-size:13.5px;">${b.updatedAt ? relTime(b.updatedAt) : 'Unknown time'}</div>
+              <div class="proj-sub" style="margin-top:2px;">${b.count} item${b.count===1?'':'s'}</div>
+            </div>
+            <button class="sync-btn ${state.restoringBackupId===b.id ? 'danger' : 'secondary'}" data-restore-backup="${b.id}">${state.restoringBackupId===b.id ? 'Tap again to restore' : 'Restore'}</button>
+          </div>`).join('') : '<div class="empty">No backups yet — they\'re created automatically when you use "Sync now."</div>'}
+      </div>` : ''}`;
   }
 
   function renderHomeTab(){
@@ -2284,7 +2402,11 @@
         <button class="nav-btn ${(state.view==='tab' && (state.tab==='more' || BURIED_TAB_KEYS.includes(state.tab)))?'active':''}" data-tab="more">${icon('more')}<span>More</span></button>
       </div>`;
 
-    root.querySelector('#sync-icon-btn').addEventListener('click', () => { state.view='sync'; render(); window.scrollTo(0,0); });
+    root.querySelector('#sync-icon-btn').addEventListener('click', () => {
+      state.view='sync';
+      render(); window.scrollTo(0,0);
+      if(state.user) loadBackupsList();
+    });
     root.querySelectorAll('[data-tab]').forEach(btn => {
       btn.addEventListener('click', () => {
         state.tab = btn.getAttribute('data-tab');
@@ -2395,7 +2517,22 @@
 
     if(state.view === 'sync'){
       const syncNowBtn = root.querySelector('#sync-now-btn');
-      if(syncNowBtn) syncNowBtn.addEventListener('click', () => { pushToCloud(); render(); });
+      if(syncNowBtn) syncNowBtn.addEventListener('click', manualSyncNow);
+      const confirmOverwriteBtn = root.querySelector('#confirm-overwrite-btn');
+      if(confirmOverwriteBtn) confirmOverwriteBtn.addEventListener('click', confirmOverwriteSync);
+      const cancelOverwriteBtn = root.querySelector('#cancel-overwrite-btn');
+      if(cancelOverwriteBtn) cancelOverwriteBtn.addEventListener('click', cancelOverwriteSync);
+      root.querySelectorAll('[data-restore-backup]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const id = btn.getAttribute('data-restore-backup');
+          if(state.restoringBackupId !== id){
+            state.restoringBackupId = id;
+            render();
+            return;
+          }
+          restoreBackup(id);
+        });
+      });
       const signOutBtn = root.querySelector('#sign-out-btn');
       if(signOutBtn) signOutBtn.addEventListener('click', signOutOfSync);
       const pushEnableBtn = root.querySelector('#push-enable-btn');
