@@ -653,14 +653,16 @@
       category: t.category === 'home' ? 'home' : 'school',
       priority: [1,2,3].includes(t.priority) ? t.priority : 2,
       dueDate: /^\d{4}-\d{2}-\d{2}$/.test(t.dueDate) ? t.dueDate : null,
-      done: !!t.done
+      done: !!t.done,
+      deleted: !!t.deleted,
+      deletedAt: t.deletedAt || null
     };
   }
   function normalizeTodoTasks(list){ return asArray(list).map(normalizeTodoTask); }
 
   function topPriorityTasks(n){
     return state.todoTasks
-      .filter(t => !t.done)
+      .filter(t => !t.done && !t.deleted)
       .slice()
       .sort((a,b) => (a.priority - b.priority) || (a.dueDate || '9999-99-99').localeCompare(b.dueDate || '9999-99-99'))
       .slice(0, n);
@@ -688,7 +690,7 @@
   function todoTasksForTimeView(key){
     const { start, end, label } = todoTimeRange(key);
     const tasks = state.todoTasks
-      .filter(t => !t.done && t.dueDate && dateInRange(t.dueDate, start, end))
+      .filter(t => !t.done && !t.deleted && t.dueDate && dateInRange(t.dueDate, start, end))
       .slice()
       .sort((a,b) => a.dueDate.localeCompare(b.dueDate) || (a.priority - b.priority));
     return { label, tasks };
@@ -1507,7 +1509,7 @@
 
   function renderTodoCategoryCard(key){
     const meta = TODO_CATEGORIES.find(c => c.key === key);
-    const openCt = state.todoTasks.filter(t => t.category === key && !t.done).length;
+    const openCt = state.todoTasks.filter(t => t.category === key && !t.done && !t.deleted).length;
     return `<button class="item-card" style="display:block; width:100%; text-align:left; border-left-color:var(--indigo);" data-open-todo-category="${key}">
       <div style="font-weight:600; font-size:15px;">${meta.label}</div>
       <div class="proj-sub" style="margin-top:6px;">${openCt} open task${openCt===1?'':'s'}</div>
@@ -1524,6 +1526,7 @@
 
   function renderTodoTab(){
     const top5 = topPriorityTasks(5);
+    const deletedCount = state.todoTasks.filter(t => t.deleted).length;
     return `
       <div class="section-title">To-Do</div>
       <div class="section-sub">Your top priorities, plus quick links to everything else.</div>
@@ -1538,14 +1541,20 @@
       <div class="section-title" style="font-size:16px; margin-top:24px;">Coming Up</div>
       ${renderTodoTimeCard('week')}
       ${renderTodoTimeCard('month')}
-      ${renderTodoTimeCard('year')}`;
+      ${renderTodoTimeCard('year')}
+
+      <div class="section-title" style="font-size:16px; margin-top:24px;">Recently Deleted</div>
+      <button class="item-card" style="display:block; width:100%; text-align:left; border-left-color:var(--ink-soft);" id="open-todo-deleted-btn">
+        <div style="font-weight:600; font-size:15px;">Recently Deleted</div>
+        <div class="proj-sub" style="margin-top:6px;">${deletedCount} item${deletedCount===1?'':'s'}</div>
+      </button>`;
   }
 
   function renderTodoCategoryDetail(key){
     const meta = TODO_CATEGORIES.find(c => c.key === key) || { label: 'Tasks' };
     const top5Ids = topPriorityTasks(5).map(t => t.id);
     const tasks = state.todoTasks
-      .filter(t => t.category === key && !top5Ids.includes(t.id))
+      .filter(t => t.category === key && !t.deleted && !top5Ids.includes(t.id))
       .slice()
       .sort((a,b) => (a.done - b.done) || (a.priority - b.priority) || (a.dueDate || '9999-99-99').localeCompare(b.dueDate || '9999-99-99'));
     return `
@@ -1554,6 +1563,32 @@
       <div class="section-sub">Your top 5 priorities show up on the main To-Do page — everything else lives here.</div>
       ${tasks.length ? tasks.map(t => renderTodoRow(t, false)).join('') : '<div class="empty">No tasks here yet.</div>'}
       ${renderTodoAddForm()}`;
+  }
+
+  function renderTodoDeletedTab(){
+    const deleted = state.todoTasks
+      .filter(t => t.deleted)
+      .slice()
+      .sort((a,b) => (b.deletedAt || '').localeCompare(a.deletedAt || ''));
+    const rows = deleted.map(t => {
+      const catLabel = (TODO_CATEGORIES.find(c => c.key === t.category) || {}).label || '';
+      return `
+        <div class="item-card" style="opacity:0.7;">
+          <div class="row">
+            <div class="txt done">${escapeHtml(t.text)}</div>
+            <div class="btn-row">
+              <button class="icon-btn" data-restore-todo="${t.id}" title="Restore">↺</button>
+              <button class="icon-btn" data-purge-todo="${t.id}" title="Delete forever">✕</button>
+            </div>
+          </div>
+          <div style="margin-top:8px; font-size:9.5px; font-family:var(--font-mono); color:var(--ink-soft); text-transform:uppercase; letter-spacing:.04em;">${catLabel}${t.deletedAt ? ' · deleted ' + relTime(t.deletedAt) : ''}</div>
+        </div>`;
+    }).join('');
+    return `
+      <button class="back-link" id="back-btn">← To-Do</button>
+      <div class="section-title">Recently Deleted</div>
+      <div class="section-sub">Restore a task, or tap ✕ to delete it for good.</div>
+      ${deleted.length ? rows : '<div class="empty">Nothing deleted.</div>'}`;
   }
 
   function renderTodoTimeViewDetail(key){
@@ -2353,6 +2388,8 @@
       bodyHtml = renderTodoCategoryDetail(state.todoCategory);
     } else if(state.view === 'todoTimeView'){
       bodyHtml = renderTodoTimeViewDetail(state.todoTimeView);
+    } else if(state.view === 'todoDeleted'){
+      bodyHtml = renderTodoDeletedTab();
     } else if(state.view === 'goalPerson'){
       bodyHtml = renderGoalPersonDetail(state.activeGoalPerson);
     } else if(state.view === 'goalCategory'){
@@ -2465,7 +2502,7 @@
         state.view = 'tab';
         state.activeCalendarBlock = null;
         state.calendarBlockDeleteArmed = false;
-      } else if(state.view === 'todoCategory' || state.view === 'todoTimeView'){
+      } else if(state.view === 'todoCategory' || state.view === 'todoTimeView' || state.view === 'todoDeleted'){
         state.view = 'tab';
         state.todoCategory = null;
         state.todoTimeView = null;
@@ -3004,7 +3041,30 @@
           render(); window.scrollTo(0,0);
         });
       });
+      const openDeletedBtn = root.querySelector('#open-todo-deleted-btn');
+      if(openDeletedBtn) openDeletedBtn.addEventListener('click', () => {
+        state.view = 'todoDeleted';
+        render(); window.scrollTo(0,0);
+      });
       wireTodoRowInteractions();
+      return;
+    }
+
+    if(state.view === 'todoDeleted'){
+      root.querySelectorAll('[data-restore-todo]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const id = btn.getAttribute('data-restore-todo');
+          const t = state.todoTasks.find(x => x.id === id);
+          if(t){ t.deleted = false; t.deletedAt = null; save(); }
+        });
+      });
+      root.querySelectorAll('[data-purge-todo]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const id = btn.getAttribute('data-purge-todo');
+          state.todoTasks = state.todoTasks.filter(x => x.id !== id);
+          save();
+        });
+      });
       return;
     }
 
@@ -3528,8 +3588,8 @@
     root.querySelectorAll('[data-del-todo]').forEach(btn => {
       btn.addEventListener('click', () => {
         const id = btn.getAttribute('data-del-todo');
-        state.todoTasks = state.todoTasks.filter(x => x.id !== id);
-        save();
+        const t = state.todoTasks.find(x => x.id === id);
+        if(t){ t.deleted = true; t.deletedAt = new Date().toISOString(); save(); }
       });
     });
     root.querySelectorAll('[data-set-priority]').forEach(btn => {
